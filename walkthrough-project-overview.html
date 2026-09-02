@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" style="color-scheme: dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aleph Hackathon · Project Overview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { wt: {
+      bg: '#000000', surface: '#0a0a0a', raised: '#141414', border: '#2a2a2a', fg: '#ffffff',
+      muted: '#a0a0a0', accent: '#a855f7', file: '#c084fc', red: '#ef4444'
+    }, node: { component: '#a855f7', composable: '#7c3aed', utility: '#6d28d9', external: '#525252', event: '#d8b4fe', data: '#9333ea' } } } } };
+  </script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #000; color: #fff; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    .mermaid-wrap svg { max-width: none !important; height: auto !important; }
+    .mermaid-wrap .node { cursor: pointer; }
+    .mermaid-wrap .node:hover rect, .mermaid-wrap .node:hover polygon, .mermaid-wrap .node:hover .label-container { filter: brightness(1.3); transition: filter .15s; }
+    .dt-body p { color: #a0a0a0; font-size: .9rem; line-height: 1.65; margin: 0 0 14px; }
+    .dt-body .shiki, .dt-body pre.code-fallback { background: #000 !important; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 8px 0 14px; }
+    .dt-body .shiki code, .dt-body pre.code-fallback code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .78rem; line-height: 1.55; background: none; padding: 0; }
+    .dt-body pre.code-fallback code { color: #e0e0e0; }
+    .viewport { touch-action: none; cursor: grab; }
+    .viewport:active { cursor: grabbing; }
+    @media (max-width: 740px) { .detail-panel { left: 12px; right: 12px; top: auto !important; bottom: 12px; max-width: none !important; max-height: 53vh; } .legend { display: none; } }
+  </style>
+</head>
+<body class="bg-wt-bg">
+  <div id="root"></div>
+  <script type="module">
+    import { createHighlighter } from 'https://esm.sh/shiki@1.29.2';
+
+    const { createElement: h, useCallback, useEffect, useRef, useState } = window.React;
+    const { createRoot } = window.ReactDOM;
+    const SUMMARY = 'Nani’s browser client creates a durable conversation, but keeps money confirmation deliberately local and explicit. The Fastify session API binds all recipient and transfer state to that conversation, then the guarded wallet agent separates memory-based identity resolution from version-bound address lookup and a WDK transfer.';
+    const NODES = {
+      appRouterShell: { type: 'component', title: 'App Router and Shared Shell', description: 'Builds the TanStack Router and shared React Query context. The root route wraps every page with caching, bottom navigation, toast feedback, and the Spanish document shell.', files: ['apps/nana-wallet/src/router.tsx:5'], code: `const router = createRouter({\n  routeTree,\n  context: { queryClient },\n});`, lang: 'tsx' },
+      agentConversation: { type: 'component', title: 'Nani Conversation Screen', description: 'The home screen turns typed or recorded speech into an agent turn, shows the agent’s state and transfer preview, and refreshes wallet data after a completed send. It blocks unrelated instructions while a money confirmation is pending.', files: ['apps/nana-wallet/src/routes/index.tsx:123'], code: `const nextTurn = await sendSessionMessage(nextMessage);\nsetIsConfirmationPending(nextTurn.status === "confirmation_required");\nsetTurn(nextTurn);`, lang: 'tsx' },
+      sessionSafety: { type: 'utility', title: 'Transfer Confirmation Guard', description: 'Keeps transfer confirmation deliberately bounded: once a confirmation is pending, only explicit confirm or cancel phrases leave the browser. Ambiguous new messages remain local and show guidance instead of risking a transaction.', files: ['apps/nana-wallet/src/lib/session-resolution.ts:68'], code: `if (CONFIRMATION_PHRASES.has(normalized)) {\n  return { kind: "resolution", message: "confirmar la transferencia" };\n}`, lang: 'typescript' },
+      walletApiBridge: { type: 'composable', title: 'Wallet API and Durable Sessions', description: 'Centralizes authenticated HTTP calls to the backend and owns the in-memory session identity used by the conversation. It creates one session lazily, posts each message to it, and retries once if the backend reports that session missing.', files: ['apps/nana-wallet/src/lib/api.ts:312'], code: `let sessionId = await ensureSession();\nlet response = await api.sendSessionMessage(sessionId, message);`, lang: 'typescript' },
+      httpGateway: { type: 'external', title: 'HTTP Gateway', description: 'Creates the Fastify API boundary and attaches CORS plus the health, wallet, session, and voice route groups. It is the single composition point for incoming backend requests.', files: ['src/server.ts:19'], code: `app.register(registerWalletRoutes);\napp.register(registerSessionRoutes);`, lang: 'typescript' },
+      sessionConversationApi: { type: 'external', title: 'Session Conversation API', description: 'Creates in-memory conversation sessions and validates each message before handing it to the wallet agent. It also cancels agent work if the HTTP client disconnects.', files: ['src/api/sessions.ts:41'], code: `result = await handleMessage(session.id, parsed.data.message, {\n  abortSignal: abortController.signal,\n});`, lang: 'typescript' },
+      sessionState: { type: 'data', title: 'Conversation State', description: 'Holds messages, pending transfer previews, recipient-resolution state, and broadcast state per UUID session. It is the safeguard that binds confirmation and recipient selection to one conversation.', files: ['src/sessions/in-memory-store.ts:33'], code: `const session: DemoSession = {\n  id: randomUUID(),\n  messages: [],\n  createdAt: new Date().toISOString(),\n};`, lang: 'typescript' },
+      guardedWalletAgent: { type: 'utility', title: 'Guarded Wallet Agent', description: 'Resolves safe named recipients, runs WDK tools through transfer guards, and turns a dry-run tool result into a session-bound confirmation preview. A matching confirmation claims that preview before broadcasting, preventing duplicate or altered sends.', files: ['src/agent/wallet-agent.ts:503'], code: `if (!normalizedInput.dryRun && !pendingMatches(session, normalizedInput)) {\n  return { error: 'confirmation_required', message: 'Refusing to broadcast: no matching confirmed preview for this transfer in the current session.' };\n}`, lang: 'typescript' },
+      recipientMemoryRetrieval: { type: 'data', title: 'Recipient Memory Retrieval', description: 'Searches a user-scoped recipient and relationship-memory store with embeddings and conservative ranking. Retrieval returns candidates or evidence, never an address fallback on errors.', files: ['src/memory/service.ts:142'], code: `const embedding = await this.embeddings.embed(normalizedQuery);\nconst candidates = await this.repository.searchRecipients(userId, normalizedQuery, embedding);\nreturn classifyRecipientCandidates(normalizedQuery, candidates, this.ranking);`, lang: 'typescript' },
+      recipientSelection: { type: 'utility', title: 'Recipient Selection', description: 'Converts an explicit name, pronoun, or relationship reference into a stable recipient ID plus version, or requests clarification. It deliberately stops before address lookup, so fuzzy or relationship evidence cannot directly initiate a payment preview.', files: ['src/agent/recipient-resolution.ts:57'], code: `const facts = await memory.search_user_memory({ query: reference.query });\nconst names = namesFromFacts(reference.query, facts.facts);\nif (names.length === 1) return candidateResult(await memory.search_recipients({ query: names[0]! }));`, lang: 'typescript' },
+      sessionBoundAddressLookup: { type: 'utility', title: 'Session-Bound Address Lookup', description: 'Resolves the address only after a recipient has been selected in the active session and its exact version remains valid. Search outputs remove addresses, keeping identity resolution separate from transfer preparation.', files: ['src/memory/tools.ts:44'], code: `const recipient = await options.service.getRecipientForVersion(\n  options.userId, selected.recipientId, selected.version,\n);\nif (!recipient || recipient.version !== selected.version || !isValidEvmAddress(recipient.address)) {`, lang: 'typescript' },
+      guardedTransfer: { type: 'external', title: 'Guarded WDK Transfer', description: 'Exposes WDK-backed wallet tools; send_token either produces a dry-run preview or invokes the live MCP client for Sepolia execution. The wallet agent separately rejects broadcasts unless they match a confirmed session preview and revalidates the saved recipient version.', files: ['src/agent/wdk-tools.ts:72'], code: `const evidence = await (await clientProvider()).sendToken({\n  network: input.network, token: input.token, to: input.to,\n  amount: input.amount, wallet: input.wallet, dryRun: input.dryRun,\n} as Parameters<WdkMcpClient['sendToken']>[0]);`, lang: 'typescript' }
+    };
+    const DIAGRAM = String.raw`graph LR
+      subgraph browser["Conversation in the Browser"]
+        appRouterShell["App Router and Shared Shell"]
+        agentConversation["Nani Conversation Screen"]
+        sessionSafety["Transfer Confirmation Guard"]
+        walletApiBridge["Wallet API and Durable Sessions"]
+      end
+      subgraph gateway["The Conversation Boundary"]
+        httpGateway["HTTP Gateway"]
+        sessionConversationApi["Session Conversation API"]
+        sessionState["Conversation State"]
+      end
+      subgraph reasoning["Safe Recipient Reasoning"]
+        guardedWalletAgent["Guarded Wallet Agent"]
+        recipientMemoryRetrieval["Recipient Memory Retrieval"]
+        recipientSelection["Recipient Selection"]
+        sessionBoundAddressLookup["Session-Bound Address Lookup"]
+      end
+      subgraph execution["Prepared Payment Execution"]
+        guardedTransfer["Guarded WDK Transfer"]
+      end
+      appRouterShell -->|"mounts"| agentConversation
+      agentConversation -->|"classifies with"| sessionSafety
+      sessionSafety -->|"permits"| walletApiBridge
+      agentConversation -->|"sends through"| walletApiBridge
+      walletApiBridge -->|"posts to"| httpGateway
+      httpGateway -->|"registers"| sessionConversationApi
+      sessionConversationApi -->|"loads"| sessionState
+      sessionConversationApi -->|"invokes"| guardedWalletAgent
+      guardedWalletAgent -->|"reads and writes"| sessionState
+      guardedWalletAgent -->|"searches"| recipientMemoryRetrieval
+      recipientMemoryRetrieval -->|"supplies evidence to"| recipientSelection
+      guardedWalletAgent -->|"resolves with"| recipientSelection
+      recipientSelection -->|"selects for"| sessionBoundAddressLookup
+      sessionBoundAddressLookup -->|"provides destination to"| guardedTransfer
+      guardedWalletAgent -->|"runs"| guardedTransfer
+      classDef component fill:#a855f7,stroke:#c084fc,color:#fff
+      classDef composable fill:#7c3aed,stroke:#a78bfa,color:#fff
+      classDef utility fill:#6d28d9,stroke:#8b5cf6,color:#fff
+      classDef external fill:#525252,stroke:#737373,color:#fff
+      classDef data fill:#9333ea,stroke:#a855f7,color:#fff
+      class appRouterShell,agentConversation component
+      class walletApiBridge composable
+      class sessionSafety,guardedWalletAgent,recipientSelection,sessionBoundAddressLookup utility
+      class httpGateway,sessionConversationApi,guardedTransfer external
+      class sessionState,recipientMemoryRetrieval data
+      click appRouterShell nodeClickHandler "View details"
+      click agentConversation nodeClickHandler "View details"
+      click sessionSafety nodeClickHandler "View details"
+      click walletApiBridge nodeClickHandler "View details"
+      click httpGateway nodeClickHandler "View details"
+      click sessionConversationApi nodeClickHandler "View details"
+      click sessionState nodeClickHandler "View details"
+      click guardedWalletAgent nodeClickHandler "View details"
+      click recipientMemoryRetrieval nodeClickHandler "View details"
+      click recipientSelection nodeClickHandler "View details"
+      click sessionBoundAddressLookup nodeClickHandler "View details"
+      click guardedTransfer nodeClickHandler "View details"`;
+
+    const LEGEND = [ ['Component', '#a855f7'], ['Client bridge', '#7c3aed'], ['Guard or resolver', '#6d28d9'], ['API or external tool', '#525252'], ['Session or memory data', '#9333ea'] ];
+    let highlighter;
+    createHighlighter({ themes: ['vitesse-dark'], langs: ['typescript', 'tsx'] }).then(value => { highlighter = value; }).catch(() => { highlighter = null; });
+
+    function usePanZoom() {
+      const viewportRef = useRef(null), canvasRef = useRef(null), zoomDisplayRef = useRef(null);
+      const state = useRef({ zoom: 1, panX: 0, panY: 0 }); const drag = useRef({ on: false, x: 0, y: 0 });
+      const apply = useCallback(() => { const s = state.current; if (canvasRef.current) canvasRef.current.style.transform = `translate(${s.panX}px,${s.panY}px) scale(${s.zoom})`; if (zoomDisplayRef.current) zoomDisplayRef.current.textContent = `${Math.round(s.zoom * 100)}%`; }, []);
+      const fitToScreen = useCallback(() => { const svg = canvasRef.current?.querySelector('svg'), vp = viewportRef.current; if (!svg || !vp) return; const s = state.current, rect = svg.getBoundingClientRect(), w = rect.width / s.zoom, hgt = rect.height / s.zoom; const fit = Math.max(.15, Math.min(1.5, Math.min((vp.clientWidth - 80) / w, (vp.clientHeight - 80) / hgt))); s.zoom = fit; s.panX = (vp.clientWidth - w * fit) / 2; s.panY = (vp.clientHeight - hgt * fit) / 2; apply(); }, [apply]);
+      useEffect(() => { const vp = viewportRef.current; if (!vp) return; const wheel = e => { e.preventDefault(); const r = vp.getBoundingClientRect(), s = state.current, f = e.deltaY < 0 ? 1.12 : 1 / 1.12, nz = Math.min(4, Math.max(.15, s.zoom * f)), ratio = nz / s.zoom, mx = e.clientX - r.left, my = e.clientY - r.top; s.panX = mx - ratio * (mx - s.panX); s.panY = my - ratio * (my - s.panY); s.zoom = nz; apply(); }; const down = e => { if (e.target.closest('.node')) return; drag.current = { on: true, x: e.clientX, y: e.clientY }; vp.setPointerCapture?.(e.pointerId); }; const move = e => { if (!drag.current.on) return; state.current.panX += e.clientX - drag.current.x; state.current.panY += e.clientY - drag.current.y; drag.current.x = e.clientX; drag.current.y = e.clientY; apply(); }; const up = () => { drag.current.on = false; }; vp.addEventListener('wheel', wheel, { passive: false }); vp.addEventListener('pointerdown', down); vp.addEventListener('pointermove', move); vp.addEventListener('pointerup', up); vp.addEventListener('pointercancel', up); window.addEventListener('resize', fitToScreen); return () => { vp.removeEventListener('wheel', wheel); vp.removeEventListener('pointerdown', down); vp.removeEventListener('pointermove', move); vp.removeEventListener('pointerup', up); vp.removeEventListener('pointercancel', up); window.removeEventListener('resize', fitToScreen); }; }, [apply, fitToScreen]);
+      return { viewportRef, canvasRef, zoomDisplayRef, fitToScreen, zoomIn: () => { state.current.zoom = Math.min(4, state.current.zoom * 1.25); apply(); }, zoomOut: () => { state.current.zoom = Math.max(.15, state.current.zoom / 1.25); apply(); } };
+    }
+    function MermaidDiagram({ onNodeClick, onReady }) { const ref = useRef(null); useEffect(() => { window.nodeClickHandler = onNodeClick; mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose', themeVariables: { primaryColor: '#0a0a0a', primaryTextColor: '#fff', primaryBorderColor: '#2a2a2a', lineColor: '#a0a0a0', background: '#000', secondaryColor: '#000', tertiaryColor: '#000', clusterBkg: '#0a0a0a', clusterBorder: '#7c3aed', edgeLabelBackground: 'transparent' }, flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' } }); mermaid.render('walkthrough-diagram', DIAGRAM).then(({ svg, bindFunctions }) => { if (ref.current) { ref.current.innerHTML = svg; bindFunctions?.(ref.current); onReady(); } }).catch(error => { ref.current.textContent = `Diagram failed to render: ${error.message}`; }); return () => { delete window.nodeClickHandler; }; }, [onNodeClick, onReady]); return h('div', { ref, className: 'mermaid-wrap' }); }
+    function CodeBlock({ node }) { const target = useRef(null); useEffect(() => { if (!target.current) return; if (highlighter) target.current.innerHTML = highlighter.codeToHtml(node.code, { lang: node.lang, theme: 'vitesse-dark' }); else target.current.innerHTML = `<pre class="code-fallback"><code></code></pre>`, target.current.querySelector('code').textContent = node.code; }, [node]); return h('div', { ref: target }); }
+    function DetailPanel({ node, close }) { if (!node) return null; return h('aside', { className: 'detail-panel fixed z-30 top-28 right-5 w-[min(390px,calc(100vw-40px))] max-h-[calc(100vh-150px)] overflow-y-auto rounded-xl border border-wt-border bg-wt-surface p-5 shadow-2xl shadow-black/70' }, h('button', { onClick: close, className: 'absolute right-3 top-2 text-2xl text-wt-muted hover:text-wt-red', 'aria-label': 'Close details' }, '×'), h('div', { className: 'pr-7 text-xs uppercase tracking-[.2em] text-wt-accent' }, 'Concept'), h('h2', { className: 'mt-1 text-xl font-semibold text-wt-fg' }, node.title), h('div', { className: 'dt-body mt-4' }, h('p', null, node.description), h('div', { className: 'mb-2 text-xs font-medium uppercase tracking-wider text-wt-muted' }, 'Source anchor'), h('ul', { className: 'mb-4 space-y-1 font-mono text-xs text-wt-file' }, ...node.files.map(file => h('li', { key: file }, file))), h('div', { className: 'mb-2 text-xs font-medium uppercase tracking-wider text-wt-muted' }, 'Key code'), h(CodeBlock, { node }))); }
+    function App() { const [selected, setSelected] = useState(null); const pan = usePanZoom(); const click = useCallback(id => setSelected(NODES[id]), []); const ready = useCallback(() => requestAnimationFrame(pan.fitToScreen), [pan.fitToScreen]); return h('main', { className: 'min-h-screen overflow-hidden bg-wt-bg' }, h('header', { className: 'relative z-20 border-b border-wt-border bg-black/95 px-5 py-5 backdrop-blur md:px-8' }, h('p', { className: 'mb-1 text-xs font-medium uppercase tracking-[.24em] text-wt-accent' }, 'Architecture walkthrough'), h('h1', { className: 'text-2xl font-semibold tracking-tight md:text-3xl' }, 'Aleph Hackathon · Nani wallet flow'), h('p', { className: 'mt-1 max-w-3xl text-sm text-wt-muted' }, 'A two-minute map of the browser conversation, guarded session API, recipient reasoning, and payment execution.')), h('section', { className: 'relative z-20 mx-5 mt-5 max-w-4xl rounded-xl border border-purple-500/30 bg-wt-surface p-4 md:mx-8' }, h('div', { className: 'mb-1 text-xs font-medium uppercase tracking-[.2em] text-wt-accent' }, 'TL;DR'), h('p', { className: 'text-sm leading-6 text-wt-muted' }, SUMMARY)), h('section', { ref: pan.viewportRef, className: 'viewport absolute inset-x-0 bottom-0 top-[205px] overflow-hidden border-t border-wt-border bg-[#030303]', 'aria-label': 'Interactive architecture diagram' }, h('div', { ref: pan.canvasRef, className: 'absolute origin-top-left p-10' }, h(MermaidDiagram, { onNodeClick: click, onReady: ready }))), h('div', { className: 'fixed bottom-5 left-5 z-20 flex items-center gap-2 rounded-lg border border-wt-border bg-wt-surface/95 p-2 text-sm shadow-xl' }, h('button', { onClick: pan.zoomOut, className: 'rounded px-2 py-1 hover:bg-wt-raised', 'aria-label': 'Zoom out' }, '−'), h('span', { ref: pan.zoomDisplayRef, className: 'w-11 text-center font-mono text-xs text-wt-muted' }, '100%'), h('button', { onClick: pan.zoomIn, className: 'rounded px-2 py-1 hover:bg-wt-raised', 'aria-label': 'Zoom in' }, '+'), h('button', { onClick: pan.fitToScreen, className: 'ml-1 rounded border border-wt-border px-2 py-1 text-xs hover:bg-wt-raised' }, 'Fit')), h('div', { className: 'legend fixed bottom-5 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-wt-border bg-wt-surface/95 px-3 py-2 shadow-xl' }, h('div', { className: 'flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-wt-muted' }, ...LEGEND.map(([label, color]) => h('span', { key: label, className: 'inline-flex items-center gap-1.5' }, h('i', { className: 'h-2.5 w-2.5 rounded-full', style: { background: color } }), label)))), h('p', { className: 'fixed bottom-5 right-5 z-20 text-xs text-wt-muted' }, 'Scroll to zoom · drag to pan · click a node'), h(DetailPanel, { node: selected, close: () => setSelected(null) })); }
+    createRoot(document.getElementById('root')).render(h(App));
+  </script>
+</body>
+</html>
