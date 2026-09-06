@@ -238,3 +238,16 @@ export const voiceSpeakRequestSchema = z.object({
   text: z.string().min(1),
 });
 export type VoiceSpeakRequest = z.infer<typeof voiceSpeakRequestSchema>;
+
+export const voiceRoomTokenRequestSchema = z.object({
+  conversationId: z.string().uuid(),
+  agentName: z.string().trim().min(1).optional(),
+});
+export type VoiceRoomTokenRequest = z.infer<typeof voiceRoomTokenRequestSchema>;
+
+export const voiceRoomTokenResponseSchema = z.object({
+  serverUrl: z.string().min(1),
+  participantToken: z.string().min(1),
+  roomName: z.string().min(1),
+});
+export type VoiceRoomTokenResponse = z.infer<typeof voiceRoomTokenResponseSchema>;

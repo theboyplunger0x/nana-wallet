@@ -1,0 +1,15 @@
+# Self-hosted LiveKit for local development. Privacy-auditable by construction:
+# no egress, no recording, and no webhook sections exist in this file — audio
+# stays on loopback (LLS-001/LLS-009).
+port: 7880
+rtc:
+  udp_port: 7881
+  port_range_start: 60000
+  port_range_end: 60100
+  # tcp_port, TURN, and egress intentionally absent.
+# Credentials: livekit-server does not expand ${VAR} inside its config file
+# (verified against v1.13.6), so the key/secret pair is injected by the compose
+# service via LIVEKIT_KEYS using the same .env credentials the API and worker
+# use. No secret is ever stored in this tracked file.
+# No webhook config, no egress section, no recording section. Their absence is
+# the auditable privacy guarantee.
