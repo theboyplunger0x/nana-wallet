@@ -91,3 +91,47 @@ describe("conversation API", () => {
     ).toBe(true);
   });
 });
+
+describe("voice room token API", () => {
+  it("posts only the conversation id and returns the raw room token contract", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        serverUrl: "ws://localhost:7880",
+        participantToken: "room-token",
+        roomName: "nani-conv-1",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.fetchVoiceRoomToken("conv-1")).resolves.toEqual({
+      serverUrl: "ws://localhost:7880",
+      participantToken: "room-token",
+      roomName: "nani-conv-1",
+    });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input).endsWith("/v1/voice/room-token")).toBe(true);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ conversationId: "conv-1" });
+  });
+
+  it("surfaces the voice endpoint error message without the wallet envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse(
+          {
+            status: "error",
+            message: "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are required.",
+            code: "voice_token_unavailable",
+          },
+          503,
+        ),
+      ),
+    );
+
+    await expect(api.fetchVoiceRoomToken("conv-1")).rejects.toThrow(
+      "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are required.",
+    );
+  });
+});

@@ -19,19 +19,50 @@ export type LiveKitWebClientOptions = {
   onConnectionLost?: () => void;
   onReconnected?: () => void;
   room?: Room;
+  tokenSource?: "local" | "cloud";
   tokenServerId?: string;
   agentName?: string;
   participantIdentity?: string;
 };
 
-function readConfig(options: LiveKitWebClientOptions) {
-  const tokenServerId = options.tokenServerId ?? import.meta.env["VITE_LIVEKIT_TOKEN_SERVER_ID"];
-  const agentName = options.agentName ?? import.meta.env["VITE_LIVEKIT_AGENT_NAME"] ?? "nani-agent";
+type LiveKitClientConfig =
+  | { tokenSource: "local"; participantIdentity: string }
+  | {
+      tokenSource: "cloud";
+      tokenServerId: string;
+      agentName: string;
+      participantIdentity: string;
+    };
+
+function readConfig(options: LiveKitWebClientOptions): LiveKitClientConfig {
+  const source = options.tokenSource ?? (import.meta.env["VITE_LIVEKIT_TOKEN_SOURCE"] || undefined);
   const participantIdentity =
     options.participantIdentity ?? import.meta.env["VITE_LIVEKIT_PARTICIPANT_IDENTITY"];
-  if (!tokenServerId || !participantIdentity)
-    throw new Error("Live voice is not configured for this browser.");
-  return { tokenServerId, agentName, participantIdentity };
+  if (source === "cloud") {
+    const tokenServerId = options.tokenServerId ?? import.meta.env["VITE_LIVEKIT_TOKEN_SERVER_ID"];
+    if (!tokenServerId || !participantIdentity)
+      throw new Error("Live voice is not configured for this browser.");
+    const agentName =
+      options.agentName ?? import.meta.env["VITE_LIVEKIT_AGENT_NAME"] ?? "nani-agent";
+    return { tokenSource: "cloud", tokenServerId, agentName, participantIdentity };
+  }
+  if (source !== undefined)
+    throw new Error(`Unknown VITE_LIVEKIT_TOKEN_SOURCE value: ${source}. Use "local" or "cloud".`);
+  if (!participantIdentity) throw new Error("Live voice is not configured for this browser.");
+  return { tokenSource: "local", participantIdentity };
+}
+
+/** Decodes the JWT payload (base64url) to sanity-check the identity the server signed. */
+function decodeJwtIdentity(participantToken: string): string | undefined {
+  const payload = participantToken.split(".")[1];
+  if (!payload) return undefined;
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = JSON.parse(atob(base64)) as { identity?: unknown };
+    return typeof decoded.identity === "string" ? decoded.identity : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseAgentState(participant: RemoteParticipant, onAgentState?: (state: string) => void) {
@@ -46,6 +77,8 @@ export function createLiveKitWebClient(options: LiveKitWebClientOptions = {}): V
   let manuallyDisconnected = false;
   let reconnecting = false;
   let agentIdentity: string | undefined;
+  // Server-owned room name (set by the local token source; the frontend never derives it).
+  let roomName: string | undefined;
   const attachedAudio = new Set<HTMLMediaElement>();
 
   const handleTrackSubscribed = (track: { kind: Track.Kind; attach: () => HTMLMediaElement }) => {
@@ -72,12 +105,23 @@ export function createLiveKitWebClient(options: LiveKitWebClientOptions = {}): V
   async function connect() {
     const config = readConfig(options);
     const binding = await api.createLiveVoiceBinding(options.getConversationId?.() ?? undefined);
-    const tokenSource = TokenSource.developmentTokenServer(config.tokenServerId);
-    const credentials = await tokenSource.fetch({
-      roomName: `nani-${binding.conversationId}`,
-      participantIdentity: config.participantIdentity,
-      agentName: config.agentName,
-    });
+    let credentials: { serverUrl: string; participantToken: string };
+    if (config.tokenSource === "local") {
+      // The local source asks our own API for the room token: room name, identity,
+      // grants, and agent dispatch are all decided server-side.
+      const roomToken = await api.fetchVoiceRoomToken(binding.conversationId);
+      const tokenIdentity = decodeJwtIdentity(roomToken.participantToken);
+      if (tokenIdentity !== config.participantIdentity)
+        throw new Error("Live voice token identity does not match this browser.");
+      roomName = roomToken.roomName;
+      credentials = roomToken;
+    } else {
+      credentials = await TokenSource.developmentTokenServer(config.tokenServerId).fetch({
+        roomName: `nani-${binding.conversationId}`,
+        participantIdentity: config.participantIdentity,
+        agentName: config.agentName,
+      });
+    }
     room = options.room ?? new Room({ adaptiveStream: true, dynacast: true });
     manuallyDisconnected = false;
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
@@ -192,6 +236,7 @@ export function createLiveKitWebClient(options: LiveKitWebClientOptions = {}): V
       bound = false;
       boundConversationId = undefined;
       agentIdentity = undefined;
+      roomName = undefined;
       stopAgentAudio();
       await room?.disconnect();
       room = undefined;

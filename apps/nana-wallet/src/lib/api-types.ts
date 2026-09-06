@@ -167,6 +167,12 @@ export type LiveVoiceBindingResponse = {
   bindingToken: string;
 };
 
+export type VoiceRoomTokenResponse = {
+  serverUrl: string;
+  participantToken: string;
+  roomName: string;
+};
+
 export type EndLiveConversationResponse = {
   mode: "typed";
   revision: number;

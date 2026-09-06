@@ -24,6 +24,7 @@ import type {
   LiveVoiceBindingResponse,
   TransferIntentInput,
   UpdateContactInput,
+  VoiceRoomTokenResponse,
   WalletSummary,
 } from "./api-types";
 
@@ -276,6 +277,12 @@ export const api = {
     rawConversationRequest<LiveVoiceBindingResponse>(
       "/v1/live-bindings",
       jsonRequest("POST", conversationId ? { conversationId } : {}),
+    ),
+
+  fetchVoiceRoomToken: (conversationId: string) =>
+    rawConversationRequest<VoiceRoomTokenResponse>(
+      "/v1/voice/room-token",
+      jsonRequest("POST", { conversationId }),
     ),
 
   sendConversationTurn: (conversationId: string, message: string) =>
