@@ -44,14 +44,22 @@ services:
         # Bake the recipient-memory embedding model into the image:
         #   EMBED_MODEL_PREFETCH=1 docker compose --profile dev up -d --build
         EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
+    # Live voice / provider secrets (LIVEKIT_*, OPENAI_*, binding keys) come
+    # from the git-ignored root .env; the explicit environment below
+    # overrides anything it sets for the local stack (DB, fixture mode).
+    env_file:
+      - .env
     environment:
       HOST: "0.0.0.0"
       PORT: "3000"
       DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
       DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
       WDK_TOOLS_SOURCE: "fixture"
+      WDK_NETWORK: "sepolia"
+      WDK_TOKEN: "USDT"
       RECIPIENT_MEMORY_ENABLED: "true"
       RECIPIENT_MEMORY_SEED_FILE: "examples/recipient-memory.seed.json"
+      LIVE_VOICE_ENABLED: "true"
       AGENT_RUNTIME: "${AGENT_RUNTIME:-llm}"
       OPENCODE_GO_API_KEY: "${OPENCODE_GO_API_KEY:-}"
       # CORS default already allows the dev frontend on :8083.
@@ -75,16 +83,19 @@ services:
       dockerfile: Dockerfile
       args:
         EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
+    # Same contract as backend: secrets from git-ignored .env; explicit
+    # environment wins for the local DB and fixture wallet mode.
+    env_file:
+      - .env
     environment:
       DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
       DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
       WDK_TOOLS_SOURCE: "fixture"
+      WDK_NETWORK: "sepolia"
+      WDK_TOKEN: "USDT"
       RECIPIENT_MEMORY_ENABLED: "true"
-      LIVEKIT_URL: "${LIVEKIT_URL:-}"
-      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
-      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
-      LIVE_VOICE_BINDING_PUBLIC_KEY: "${LIVE_VOICE_BINDING_PUBLIC_KEY:-}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # LIVEKIT_URL/API_KEY/API_SECRET, LIVE_VOICE_BINDING_PUBLIC_KEY and
+      # OPENAI_API_KEY come from the git-ignored .env via env_file.
     depends_on:
       db:
         condition: service_healthy
