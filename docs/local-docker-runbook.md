@@ -70,6 +70,18 @@ done
 > escribir en la base. Si el esquema no está aplicado, la API arranca pero los
 > turns fallan al tocar la base.
 
+### Sembrar datos demo de recipient memory
+
+Para que el agente resuelva destinatarios por nombre ("Lucas"), sembrá los
+datos demo (usan el `DEMO_USER_ID` del compose, sin credenciales):
+
+```bash
+docker compose exec -T backend node dist/memory/seed.js
+```
+
+La primera ejecución descarga el modelo de embeddings (~120MB) al cache del
+contenedor; con `EMBED_MODEL_PREFETCH=1` en el build ya viene horneado.
+
 ## Variables de entorno
 
 | Variable | Valor por defecto (compose) | Significado |
@@ -91,21 +103,34 @@ Si querés un smoke de texto que no dependa de un proveedor de modelo, sumá
 
 ## Flujo fixture de texto (smoke)
 
-Con el esquema aplicado y el backend arriba, probá un turn:
+Con el esquema aplicado y el backend arriba, probá un turn.
+
+Con `AGENT_RUNTIME=deterministic` (default del compose si no exportás
+`OPENCODE_GO_API_KEY`) el parser entiende balance y envíos con dirección
+explícita:
 
 ```bash
+# Balance:
 CONVERSATION_ID=$(curl -s -X POST http://localhost:3000/v1/conversations | jq -r .conversationId)
-echo "$CONVERSATION_ID"
-
 curl -s -X POST "http://localhost:3000/v1/conversations/$CONVERSATION_ID/turns" \
   -H 'Content-Type: application/json' \
-  -d '{"message":"Mandale plata a Lucas"}' | jq
+  -d '{"message":"Cuanto plata tengo?"}' | jq
+
+# Transferencia a dirección explícita (preview + confirmación):
+curl -s -X POST "http://localhost:3000/v1/conversations/$CONVERSATION_ID/turns" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"manda 1 USDT a 0x1234567890abcdef1234567890abcdef12345678"}' | jq
+curl -s -X POST "http://localhost:3000/v1/conversations/$CONVERSATION_ID/turns" \
+  -H 'Content-Type: application/json' -d '{"message":"confirmar"}' | jq
 ```
 
 Con `WDK_TOOLS_SOURCE=fixture` no hay wallet, unlock ni broadcast: la respuesta
-es un preview de confirmación (o una aclaración si hay ambigüedad). Para un
-recorrido completo (retrieval por nombre/relación, confirmación, memoria),
-seguí la secuencia de [docs/demo-runbook.md](demo-runbook.md).
+es un preview de confirmación (o una aclaración si hay ambigüedad).
+
+Para lenguaje natural completo ("Mandale plata a Lucas", retrieval por
+nombre/relación, memoria) necesitás el runtime LLM: exportá
+`OPENCODE_GO_API_KEY` antes del `docker compose --profile dev up -d` y seguí la
+secuencia de [docs/demo-runbook.md](demo-runbook.md).
 
 ## Worker de voz
 

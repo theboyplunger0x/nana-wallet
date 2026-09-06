@@ -47,10 +47,13 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "3000"
-      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent"
+      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
       DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
       WDK_TOOLS_SOURCE: "fixture"
       RECIPIENT_MEMORY_ENABLED: "true"
+      RECIPIENT_MEMORY_SEED_FILE: "examples/recipient-memory.seed.json"
+      AGENT_RUNTIME: "${AGENT_RUNTIME:-llm}"
+      OPENCODE_GO_API_KEY: "${OPENCODE_GO_API_KEY:-}"
       # CORS default already allows the dev frontend on :8083.
       # For a model-free fixture smoke set AGENT_RUNTIME=deterministic; for the
       # LLM text flow provide OPENCODE_GO_API_KEY. See docs/local-docker-runbook.md.
@@ -73,7 +76,7 @@ services:
       args:
         EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
     environment:
-      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent"
+      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
       DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
       WDK_TOOLS_SOURCE: "fixture"
       RECIPIENT_MEMORY_ENABLED: "true"

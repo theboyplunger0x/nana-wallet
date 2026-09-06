@@ -58,6 +58,9 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/.cache ./.cache
 
+# Demo seed data (no credentials — see README). Used by dist/memory/seed.js.
+COPY examples ./examples
+
 # Entrypoint dispatches the single image between the API and the voice worker.
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 RUN chmod +x ./docker/entrypoint.sh
