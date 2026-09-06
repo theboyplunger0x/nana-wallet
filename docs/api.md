@@ -143,6 +143,48 @@ opaque and is never returned by state inspection, room data, traces, or logs.
 Production must replace the demo identity and issue authenticated LiveKit
 tokens from Fastify.
 
+## `POST /v1/voice/room-token`
+
+Issues a short-lived, room-scoped LiveKit token for the browser to connect to
+the conversation's room. Identity and room naming are server-authoritative:
+the request only names the conversation, and the room is always derived as
+`nani-<conversationId>`.
+
+```json
+{ "conversationId": "b1f0...", "agentName": "nani-agent" }
+```
+
+`agentName` is optional. When omitted, the server's default agent
+(`LIVEKIT_AGENT_NAME`, fallback `nani-agent`) is dispatched into the room.
+
+```json
+{ "serverUrl": "ws://localhost:7880", "participantToken": "eyJ...", "roomName": "nani-b1f0..." }
+```
+
+The browser connects with `serverUrl` + `participantToken`; it never builds
+room names, grants, or identities itself.
+
+Errors:
+
+- `400 { status, message, code: 'invalid_body' }` — malformed or missing
+  request body (`conversationId` must be a UUID).
+- `503 { status, message, code: 'voice_token_unavailable' }` — LiveKit token
+  issuance is misconfigured: missing `LIVEKIT_URL` / `LIVEKIT_API_KEY` /
+  `LIVEKIT_API_SECRET`, missing `DEMO_USER_ID`, or a `LIVEKIT_ROOM_TOKEN_TTL`
+  below the 60-second minimum. The message names the offending variable.
+
+Privacy/security notes:
+
+- The token is short-lived (`LIVEKIT_ROOM_TOKEN_TTL`, default `600` seconds,
+  minimum `60`) and scoped to the single conversation room.
+- Video grants are exactly `roomJoin`, `canPublish`, `canSubscribe` for that
+  room — no `roomAdmin`, no `roomCreate`, so the token can never control or
+  record a room.
+- The token identity is the server-owned demo identity (`DEMO_USER_ID`); the
+  browser cannot choose or forge it.
+- The participant token is returned only to the requesting client and is never
+  persisted or logged by the API.
+
 ## Recipient-memory behaviour
 
 When `RECIPIENT_MEMORY_ENABLED=true`, a named or relationship recipient goes

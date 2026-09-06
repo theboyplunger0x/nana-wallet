@@ -1,12 +1,62 @@
 # Apply Progress: Local LiveKit Self-Host
 
+## Batch 3 — PR3 slice (docs + root env example + verification gates)
+
+Status: **PR3 slice complete.** Only the manual/human tasks (13.1, 13.2) and the parent-owned Post-Apply Review row remain unchecked.
+
+### Completed tasks (checked in tasks.md)
+
+- [x] 10.1 — `docs/api.md`: new `POST /v1/voice/room-token` section matching the existing doc style (zod-schema source-of-truth note untouched): request `{ conversationId (uuid), agentName? }`, response `{ serverUrl, participantToken, roomName }`, `400 invalid_body`, `503 voice_token_unavailable` naming the offending variable, and privacy/security notes — short-lived token (`LIVEKIT_ROOM_TOKEN_TTL`, default 600, min 60), single-room scope (`nani-<conversationId>` derived server-side), join/publish/subscribe-only grants (no `roomAdmin`/`roomCreate`), server-owned demo identity, token never persisted or logged. Placed directly after `POST /v1/live-bindings`, which previously pointed at the Cloud token server.
+- [x] 10.2 — `docs/livekit-development-runbook.md`: new "Self-hosted LiveKit (default local)" section presenting the self-hosted route as the local default — `docker compose up -d livekit` → wait for healthcheck → `npm run livekit:dev` registers against the local server → start API and web app → one non-financial turn and one financial preview→confirm turn. Documents: the ONE shared `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` pair serving container (compose `LIVEKIT_KEYS` injection), API, and worker; loopback-only published ports; the absence of egress/recording/webhook sections in `docker/livekit.yaml` as the auditable privacy guarantee (privacy contract unchanged); Colima on macOS including the UDP port-range fallback (`colima start --port-range 60000-60100`); TTL expiry recovery ("stop and start live voice again"); the different-host `LIVEKIT_URL` note; and an optional smoke e2e block against `ws://localhost:7880`. Root env block now shows `LIVEKIT_URL=ws://localhost:7880` as the local default; wallet env block shows `VITE_LIVEKIT_TOKEN_SOURCE=local` with `VITE_LIVEKIT_TOKEN_SERVER_ID` commented as Cloud-only. New "Cloud alternative" subsection keeps the Cloud path documented as an explicit alternative (`VITE_LIVEKIT_TOKEN_SOURCE=cloud` + token server id). Prerequisites updated: Colima noted for macOS, LiveKit Cloud project demoted to alternative-only.
+- [x] 10.3 — root `.env.example`: comment-only additions — commented `# LIVEKIT_URL=ws://localhost:7880` local-default guidance pointing at the runbook, a note that the SAME key/secret pair serves the LiveKit container + Fastify API + worker, and commented `# LIVEKIT_ROOM_TOKEN_TTL=600` (optional, default 600, min 60). Verified programmatically: zero lines removed, only comment lines added, no secret values.
+- [x] 11.1 — backend verification run (see commands): the task's four focused test files pass (30 tests), full root suite green, and `tests/unit/livekit-privacy.test.ts` inside the run confirms the privacy reader still forces recording/observability off and throws on enable attempts (no regression).
+
+### Files changed
+
+- `docs/api.md` (room-token endpoint section)
+- `docs/livekit-development-runbook.md` (self-hosted local default section, prerequisites, env blocks, Cloud alternative, smoke note)
+- `.env.example` (root, comment-only; applied via checked Python script — direct edit tool blocked on `.env*` paths, same safety policy as D8)
+- `openspec/changes/local-livekit-selfhost/{tasks.md,apply-progress.md}`
+
+### Validation commands run (all in the worktree)
+
+| Command | Result |
+| --- | --- |
+| root `npm run lint` | exit 0 |
+| root `npm run typecheck` | exit 0 |
+| root `npm test -- --run tests/unit/voice-room-token.test.ts tests/unit/livekit-config.test.ts tests/unit/livekit-privacy.test.ts tests/integration/api-voice.test.ts` | 4 files passed / 30 tests passed |
+| root `npm test` | 65 files passed / 9 skipped; 348 tests passed / 19 skipped (pre-existing DB/e2e skips) |
+| `apps/nana-wallet` `npm run lint` | exit 0 |
+| `apps/nana-wallet` `npm run typecheck` | exit 0 |
+| `apps/nana-wallet` `npm test` | 13 files passed / 50 tests passed |
+| `docker compose config` | resolves, exit 0 (expected interpolation warnings for unset `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` without a root `.env`); `host_ip: 127.0.0.1` loopback bindings confirmed; no containers left running (smoke was done in Batch 1; none started here) |
+
+### TDD note (strict TDD)
+
+This slice is documentation + env-comment + verification only (no production code paths), so no RED/GREEN cycle applies; the verification matrix above is the completion evidence.
+
+### Deviations from design (recorded)
+
+- **D10 — `.env.example` edit via script**: the direct file-edit tool is safety-blocked on `.env*` paths (same as D8); the identical comment-only patch was applied via a checked Python script with before/after verification (0 removed lines, comments only, no secret values).
+
+### Workload / PR boundary
+
+- PR3 slice only (this batch): docs + root env comments + verification gates — 3 files plus the openspec task/progress updates, well within the 400-line budget.
+- PR1 (`8f6a21b`) and PR2 (`453d8a8`) are committed; PR3 is ready for the parent commit. No commit performed by this batch.
+
+### Remaining unchecked tasks
+
+- [ ] 13.1 — manual runbook check (documented, not automated) — deliberately left unchecked for the user.
+- [ ] 13.2 — optional smoke e2e — deliberately left unchecked for the user.
+- Parent-owned Post-Apply Review row (preserved byte-for-byte).
+
 ## Batch 1 — PR1 slice (deps + infra + backend + backend tests)
 
 Status: **PR1 slice complete.** ~~PR2 (frontend) and PR3 (docs + verification) pending.~~ → see Batch 2: PR2 complete. PR3 pending.
 
 ## Batch 2 — PR2 slice (frontend: types, api client, token source selector, colocated tests)
 
-Status: **PR2 slice complete.** PR3 (docs + verification gates) and the parent-owned Post-Apply Review remain.
+Status: **PR2 slice complete.** ~~PR3 (docs + verification gates) and the parent-owned Post-Apply Review remain.~~ → see Batch 3: PR3 complete. Only manual tasks 13.1/13.2 and the Post-Apply Review remain.
 
 ### Completed tasks (checked in tasks.md)
 

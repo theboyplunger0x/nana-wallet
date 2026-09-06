@@ -23,8 +23,8 @@ Record any remaining ElevenLabs retention limitation in the deployment notes.
 ## Prerequisites
 
 - Node.js 22.18 or newer and npm.
-- Supabase CLI 2.80.0 and Docker Desktop.
-- A LiveKit Cloud development project with an agent registered for the configured name.
+- Supabase CLI 2.80.0 and Docker Desktop (on macOS, Colima also works — see the self-hosted LiveKit section below for the UDP port-forwarding note).
+- A self-hosted LiveKit server started with `docker compose up -d livekit` (local default). A LiveKit Cloud development project is only needed for the documented Cloud alternative.
 - An Ed25519 key pair generated outside the repository.
 
 Generate a development key pair without committing it:
@@ -57,7 +57,8 @@ AGENT_RUNTIME=deterministic
 LIVE_VOICE_ENABLED=true
 LIVE_VOICE_BINDING_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
 LIVE_VOICE_BINDING_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----
-LIVEKIT_URL=wss://your-project.livekit.cloud
+# Local default: self-hosted LiveKit from the compose stack.
+LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_API_KEY=development-key
 LIVEKIT_API_SECRET=development-secret
 ELEVENLABS_API_KEY=development-provider-key
@@ -83,17 +84,92 @@ In the wallet `.env.local`, configure only public development values:
 ```dotenv
 VITE_API_URL=http://localhost:3000
 VITE_AGENT_BACKEND=1
-VITE_LIVEKIT_TOKEN_SERVER_ID=your-development-token-server-id
+# Default (local): the browser asks our own API for the room token.
+VITE_LIVEKIT_TOKEN_SOURCE=local
+# Cloud-only: required under VITE_LIVEKIT_TOKEN_SOURCE=cloud, ignored under local.
+# VITE_LIVEKIT_TOKEN_SERVER_ID=your-development-token-server-id
 VITE_LIVEKIT_AGENT_NAME=nani-agent
 VITE_LIVEKIT_PARTICIPANT_IDENTITY=11111111-1111-4111-8111-111111111111
 ```
 
-The browser asks LiveKit Cloud's development token server for a short-lived
-room token at session start. The token server ID is public development
-configuration; API keys, API secrets, and binding private keys must not be
-placed in `VITE_*` values. The returned media credential is scoped to the room
-and agent requested by the browser, while the signed Fastify binding remains
-the worker's application identity check.
+With the default `VITE_LIVEKIT_TOKEN_SOURCE=local`, the browser calls
+`POST /v1/voice/room-token` after binding the conversation and connects with
+the returned short-lived, room-scoped token; `VITE_LIVEKIT_TOKEN_SERVER_ID`
+is not needed. The Cloud path remains an explicit alternative: set
+`VITE_LIVEKIT_TOKEN_SOURCE=cloud` and configure
+`VITE_LIVEKIT_TOKEN_SERVER_ID` to keep the legacy LiveKit Cloud development
+token server flow byte-for-byte. On both paths the browser verifies that the
+token identity matches `VITE_LIVEKIT_PARTICIPANT_IDENTITY` before
+    connecting. The signed Fastify binding remains the worker's application
+    identity check.
+
+## Self-hosted LiveKit (default local)
+
+The local default is a self-hosted LiveKit server managed by the same compose
+stack as PostgreSQL. The server, API, and worker share one credential pair:
+`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` from the root `.env` are read by the
+API and worker directly, and the compose service injects the same pair into the
+LiveKit server via `LIVEKIT_KEYS`. One key, three processes — no Cloud project
+required.
+
+Start the server before the API and worker:
+
+```bash
+docker compose up -d livekit
+docker compose ps livekit   # wait for the healthcheck to report healthy
+```
+
+The container publishes only loopback ports (`127.0.0.1:7880` signaling,
+`7881/udp` and `60000-60100/udp` media) and `docker/livekit.yaml` contains no
+egress, recording, or webhook sections — their absence is the auditable privacy
+guarantee, and the privacy and retention contract above is unchanged. `LIVEKIT_URL`
+stays `ws://localhost:7880` in the root `.env`.
+
+macOS notes:
+
+- Docker Desktop works out of the box. With Colima, UDP port forwarding can be
+  flaky; start Colima with an explicit forwarded port range, e.g.
+  `colima start --port-range 60000-60100`, if media does not flow.
+- If the browser connects but audio is one-way, check that `7881/udp` and the
+  `60000-60100/udp` range actually reach the container (`docker compose port
+  livekit 7881/udp`).
+
+Hosting notes:
+
+- The API and worker must reach the same server the browser uses. Running the
+  API on a different host than the browser? Set `LIVEKIT_URL` on that host to a
+  URL the browser can reach (and loopback-only publishing will no longer apply
+  — prefer keeping everything on one machine for development).
+- Room tokens are short-lived (`LIVEKIT_ROOM_TOKEN_TTL`, default 600 seconds,
+  minimum 60). If a live session outlives its token, live voice fails with a
+  connection error: stop live voice and start it again to fetch a fresh token.
+
+Then run the normal flow: `npm run livekit:dev` registers the agent against the
+local server, start the API and the web app (see "Start independently" below),
+and exercise one non-financial turn and one financial preview→confirm turn.
+
+### Cloud alternative
+
+To use LiveKit Cloud instead of the local server, set `LIVEKIT_URL` to your
+`wss://<project>.livekit.cloud` URL and the matching Cloud credentials in the
+root `.env`, and set `VITE_LIVEKIT_TOKEN_SOURCE=cloud` plus
+`VITE_LIVEKIT_TOKEN_SERVER_ID` in the wallet `.env.local`. The Cloud dev token
+server then issues the browser's room token; the local self-hosted path above is
+the default and requires no Cloud account.
+
+### Optional smoke e2e against the local server
+
+The provider-backed smoke can run against the self-hosted server:
+
+```bash
+LIVEKIT_URL=ws://localhost:7880 \
+LIVEKIT_E2E=1 \
+LIVEKIT_AGENT_RUNTIME=native-livekit \
+LIVEKIT_E2E_AGENT_NAME=nani \
+LIVEKIT_E2E_BINDING_TOKEN='short-lived-token' \
+LIVEKIT_E2E_BINDING_PUBLIC_KEY='public-key-pem' \
+npm run test:e2e:livekit-smoke
+```
 
 ## Live voice architecture
 
