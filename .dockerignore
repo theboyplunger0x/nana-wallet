@@ -1,0 +1,16 @@
+# Build context exclusions for the backend Docker image.
+# Keep the backend image lean: the frontend, tests, evals, docs, and planning
+# artifacts are not needed to build or run the API / worker.
+
+node_modules
+dist
+.cache
+.git
+apps
+tests
+evals
+.env
+.env.*
+docs
+.agent-workflow
+openspec

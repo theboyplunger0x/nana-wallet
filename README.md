@@ -274,6 +274,21 @@ npx wdk wallet unlock --name agent-dev --ttl 30
 
 No ejecutes `wallet create` si `agent-dev` ya existe. Fondeá esa wallet con montos mínimos de Sepolia ETH para gas y del token de prueba; nunca copies una seed o secreto al repositorio. Configurá en `.env` `WDK_TOOLS_SOURCE=live`, `WDK_WALLET_NAME=agent-dev`, `WDK_NETWORK=sepolia`, `WDK_TOKEN=USDT`, `WDK_MAX_TRANSFER_AMOUNT=0.05` y `WDK_ALLOWED_RECIPIENTS=<direcciones EVM aprobadas separadas por coma>`. El límite y la allowlist son obligatorios y fail-closed: reemplazá el ejemplo por el destinatario real aprobado de Sepolia antes de iniciar el backend. `WDK_INDEXER_API_KEY` es opcional para transferencias, pero necesario para consultar historial indexado. Configurá la URL del backend en el frontend según el runbook. Una ejecución live puede emitir una transacción real de testnet. Los tests `npm run test:e2e:wdk-mcp` son de lectura/metadatos y no llaman `send_token`.
 
+## Backend local con Docker
+
+Para levantar el backend y Postgres sin `npm ci` ni `tsx watch`, seguí el
+[runbook Docker](docs/local-docker-runbook.md). Un solo comando arranca la base
+(pgvector) y la API:
+
+```sh
+docker compose --profile dev up -d --build
+```
+
+La API queda en `http://localhost:3000`. El esquema de la base se aplica con los
+mismos pasos que CI (roles + migraciones vía psql); el runbook los detalla. El
+worker de voz usa la misma imagen detrás del perfil `worker`. Este flujo es
+local: el deploy en Render/Supabase cloud y el APK Android son work units aparte.
+
 For the RAG demo, set the following values in `.env` (the supplied UUID and
 seed are demo data and contain no credential):
 
@@ -367,9 +382,11 @@ contain it.
 | `RECIPIENT_MEMORY_SCORE_MARGIN` | `0.08` | Required lead over the runner-up; otherwise clarification is required. |
 | `RECIPIENT_MEMORY_SEED_FILE` | — | Confirmed-only JSON seed consumed by `npm run db:seed`. |
 
-`compose.yaml` starts only PostgreSQL/pgvector and persists its data in the
-named `recipient_memory_postgres` volume. A hosted pgvector-compatible
-PostgreSQL changes only the URLs above.
+`compose.yaml` arranca PostgreSQL/pgvector y persiste sus datos en el volumen
+`recipient_memory_postgres`. Con el perfil `dev` también levanta el backend API
+(`docker compose --profile dev up -d --build`); ver el
+[runbook Docker](docs/local-docker-runbook.md). Un Postgres compatible con
+pgvector cambia solo las URLs de arriba.
 
 > **Dos setups locales de base de datos.** Existen dos formas de levantar Postgres:
 >

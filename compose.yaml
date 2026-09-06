@@ -32,6 +32,60 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+  # Local full-stack dev experience: one `docker compose --profile dev up`
+  # starts Postgres + the API. Kept behind `profiles: [dev]` so the CI/tests
+  # command `docker compose up -d db` keeps starting only the database.
+  backend:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Bake the recipient-memory embedding model into the image:
+        #   EMBED_MODEL_PREFETCH=1 docker compose --profile dev up -d --build
+        EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent"
+      DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
+      WDK_TOOLS_SOURCE: "fixture"
+      RECIPIENT_MEMORY_ENABLED: "true"
+      # CORS default already allows the dev frontend on :8083.
+      # For a model-free fixture smoke set AGENT_RUNTIME=deterministic; for the
+      # LLM text flow provide OPENCODE_GO_API_KEY. See docs/local-docker-runbook.md.
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["api"]
+
+  # LiveKit voice worker — same image, different entrypoint. Gated behind
+  # `profiles: [worker]` so it is never started by the dev profile. The worker
+  # reads required env from the shell and fails closed (throws at startup) if
+  # any required value is absent.
+  voice-worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        EMBED_MODEL_PREFETCH: "${EMBED_MODEL_PREFETCH:-0}"
+    environment:
+      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent"
+      DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
+      WDK_TOOLS_SOURCE: "fixture"
+      RECIPIENT_MEMORY_ENABLED: "true"
+      LIVEKIT_URL: "${LIVEKIT_URL:-}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
+      LIVE_VOICE_BINDING_PUBLIC_KEY: "${LIVE_VOICE_BINDING_PUBLIC_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["worker"]
 
 volumes:
   recipient_memory_postgres:
