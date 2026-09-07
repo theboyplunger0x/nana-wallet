@@ -1,6 +1,64 @@
 # Apply Progress: circle-arc-runtime-integration
 
-## Batch 2 = PR B (this run)
+## Batch 3 = PR C (this run)
+
+Scope: PR C (final) of 3 stacked PRs — tasks 6.1–6.5 (batch 6: D8 boot guard, `.env.example`, compose check, docs) and 7.1–7.3 (batch 7: root gates, frontend suite, fake-Circle integration). 7.4 (manual E2E) intentionally UNCHECKED for the user.
+
+### Completed tasks (all checked off in tasks.md)
+
+- 6.1: D8 config-shape guard in `createWalletProvider`'s circle-arc branch (`src/runtime/dependencies.ts`): a set-but-mismatched `WDK_NETWORK` (≠ `arc-testnet`, uses the exported `ARC_TESTNET_NETWORK` constant) or `WDK_TOKEN` (≠ `USDC`) throws `CircleArcConfigError` at boot. Unset values remain allowed (provider defaults hold); an empty string throws (fail closed).
+- 6.2: boot-guard tests in `tests/unit/circle-arc-provider.test.ts` (new describe): `WDK_NETWORK=sepolia` → `CircleArcConfigError` naming `WDK_NETWORK=arc-testnet`; `WDK_TOKEN=USDT` → naming `WDK_TOKEN=USDC`; matching pair → `circle-arc`/`live` provider built. Suite: 31 tests green.
+- 6.3: `.env.example` circle-arc section finalized — credential provenance (Circle Console → Developer Control), 64-hex entity-secret note, secret-hygiene guidance (production-grade secret, never logged/never sent to client), `WDK_NETWORK=arc-testnet` + `WDK_TOKEN=USDC`, trust model (Circle holds keys server-side, device never signs, Arc TESTNET only, chain id 5042002), and the policy vars block re-labeled "Required in live or circle-arc mode" (fail closed → `policy_rejected`).
+- 6.4: compose verification — `grep -E 'WDK_|SEPOLIA|CIRCLE|ARC' compose.yaml` → no matches (exit 1); `docker compose config` → valid. NO compose change required; `.env` interpolation alone drives circle-arc. Recorded in the runbook note.
+- 6.5: Arc sections added to BOTH parent-named runbooks. Note: `docs/local-docker-runbook.md` does not exist on this branch; the wallet runbook on `arc-migration` is `docs/local-live-runbook.md` (the file tasks.md named) — the full Arc section (env setup, trust model, testnet-only boundary, `/health` provider field, docs/api.md-untouched note, compose note, and the 6-step consent-first Manual E2E for 7.4) went there, plus a condensed Arc section (selection, `CIRCLE_*` envs, testnet-only, real-USDC consent warning, `/health` field note) in `docs/livekit-development-runbook.md`. `docs/api.md` untouched (no `/v1` change; `/health` is not a `/v1` route).
+- 7.1: root gates green — `npm run lint` exit 0; `npm run typecheck` exit 0; full `npm test` → 71 files passed, 8 skipped; 423 passed, 17 skipped. No regression on fixture/live/WDK paths.
+- 7.2: frontend suite as-is (installed `apps/nana-wallet` deps in the worktree first — `node_modules` was absent): `npm run typecheck` exit 0; `npm test` → 12 files / 42 tests passed. No frontend source change; no `/v1` shape changed.
+- 7.3: new `tests/integration/fake-circle-transfers.test.ts` (3 tests) — typed conversation flow (previewTransfer → resolveDecision confirm → runFinancialTransfer) with a real `CircleArcProvider` over an injected fake Circle client + fake Arc RPC + an in-memory repository, virtual instant clock, no network: (a) happy path → `sent` with the Arcscan explorer URL, `progress.phase: completed`, and `createTransaction` receiving `idempotencyKey`/`refId` = persisted `previewId` (CAR-006 via `toTransferRequest`); (b) Circle API failure mid-broadcast → `broadcast_uncertain`, session blocked (`phase: uncertain`, `transferResolutionState: uncertain`), retry → `broadcast_uncertain` with NO second `createTransaction` (CAR-007); (c) `0x0` receipt → `transfer_reverted` with `phase: failed` (CAR-008/009).
+
+### Files changed (this run)
+
+- `src/runtime/dependencies.ts` — D8 boot guard (imports `ARC_TESTNET_NETWORK` + `CircleArcConfigError`).
+- `.env.example` — finalized circle-arc section + policy-vars comment.
+- `docs/local-live-runbook.md`, `docs/livekit-development-runbook.md` — Arc Testnet sections (+ Manual E2E steps in the former).
+- Tests: `tests/unit/circle-arc-provider.test.ts` (+boot-guard describe), `tests/integration/fake-circle-transfers.test.ts` (new), `tests/integration/api-health.test.ts` and `tests/integration/api-wallet.test.ts` (hermeticity hardening, see deviations).
+- `compose.yaml`, `src/wallet/circle-arc-provider.ts`, `docs/api.md`, `apps/nana-wallet` — no change (asserted).
+
+### Verification evidence (exact commands, in the worktree `/Users/ramiro/Desktop/projects/personales/aleph-hackathon.arc-migration`)
+
+| Command | Result |
+| --- | --- |
+| `npx vitest run tests/unit/circle-arc-provider.test.ts` | 31 passed |
+| `npx vitest run tests/integration/fake-circle-transfers.test.ts` | 3 passed |
+| `npm run lint` (`eslint src tests --max-warnings=0`) | exit 0 |
+| `npm run typecheck` (`tsc -p tsconfig.test.json --noEmit`) | exit 0 |
+| `npm test` (full Vitest suite) | 71 files passed, 8 skipped; 423 passed, 17 skipped — no regression on fixture/live/WDK paths |
+| `npm --prefix apps/nana-wallet run typecheck` | exit 0 |
+| `npm --prefix apps/nana-wallet test` | 12 files / 42 tests passed |
+| `docker compose config` | valid |
+
+Standard Mode (strict_tdd: false per tasks.md): tests written alongside each change.
+
+### Deviations from design
+
+- Runbook file: parent slice named `docs/local-docker-runbook.md`; that file does not exist on `arc-migration` — used `docs/local-live-runbook.md` (tasks.md's name) plus `docs/livekit-development-runbook.md`. Flag to the parent if a docker runbook was intended elsewhere.
+- Worktree `.env` (untracked, never committed): it carried `WDK_TOOLS_SOURCE=circle-arc` + `WDK_NETWORK=sepolia`/`WDK_TOKEN=USDT` — exactly the misconfiguration D8 now rejects at boot. The first full-suite run failed 9 tests with `CircleArcConfigError` (the guard working as designed). Fixed the two non-secret lines in place to `WDK_NETWORK=arc-testnet` / `WDK_TOKEN=USDC` (the 3 `CIRCLE_*` secrets were not read or printed). Without this, a real `npm run dev` in the worktree would fail boot by design.
+- `tests/integration/api-wallet.test.ts` + `api-health.test.ts` hermeticity hardening: these fixture-mode suites pinned `WDK_TOOLS_SOURCE` at module top level, but the pin ran AFTER the `import { buildServer }` chain — during which dotenv loads the ambient `.env` and `src/api/wallet.ts` freezes `NETWORK = process.env.WDK_NETWORK` at module import. With the corrected `.env` the address test deterministically read `arc-testnet`. Moved the pins into `vi.hoisted(...)` so they execute before the import (behavior for a given env unchanged; source untouched — the lazy-read refactor of `src/api/wallet.ts` matches the existing `src/api/health.ts` pattern but is OUTSIDE this slice's allowed edit surfaces, left as a follow-up suggestion for the parent).
+
+### Remaining tasks (unchecked)
+
+- `- [ ] 7.4 Manual E2E runbook execution (real CIRCLE_* creds, real testnet USDC, explicit user consent) ...` — intentionally left UNCHECKED for the user; the numbered steps are documented in `docs/local-live-runbook.md` → "Arc Testnet (Circle developer-controlled wallet)" → "Manual E2E".
+- `- [ ] Start or reuse a bounded review of the candidate after the apply phase completes ...` (`<!-- sdd-owner: parent -->`) — parent-owned deferred lifecycle action.
+
+### Workload / PR boundary
+
+- PR C of 3 stacked PRs (parent-resolved delivery path). Diff vs PR B commit (2a6c5e1): src +1 file/+18 lines, `.env.example`/docs +~130 lines, tests +~380 lines — the mandated fake-Circle integration suite and boot-guard/health hermeticity tests dominate; no test dropped to fit a budget.
+
+### Notes
+
+- Artifact store for this change remains the openspec files in the worktree (Engram was unreachable in earlier runs; not retried here).
+- No git commit performed (parent owns commits).
+
+## Batch 2 = PR B (previous run)
 
 Scope: PR B of 3 stacked PRs — tasks 4.2, 4.3 (completion of batch 4), and batch 5 (health contract, D5) + D6 explorer URL. Batches 6–7 (PR C) untouched.
 

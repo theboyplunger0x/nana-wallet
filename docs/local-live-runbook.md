@@ -112,6 +112,70 @@ through the separately approved manual harness with `WDK_LIVE=1`; adding
 `WDK_ALLOW_BROADCAST=1` and `WDK_BROADCAST_APPROVED=1` is required for the
 actual broadcast path. The normal test suite never enables those gates.
 
+## Arc Testnet (Circle developer-controlled wallet)
+
+`WDK_TOOLS_SOURCE=circle-arc` selects the Circle developer-controlled wallet
+provider on Arc Testnet as an alternative to the WDK path. The provider is
+built eagerly at process boot: missing or malformed credentials, or a
+`WDK_NETWORK`/`WDK_TOKEN` that does not match the testnet-only shape, fail
+the boot with `CircleArcConfigError`. There is no fixture fallback.
+
+Required environment (credentials come from the Circle Console, Developer
+Control section):
+
+```dotenv
+WDK_TOOLS_SOURCE=circle-arc
+WDK_NETWORK=arc-testnet
+WDK_TOKEN=USDC
+CIRCLE_API_KEY=TEST_API_KEY:id:secret
+CIRCLE_ENTITY_SECRET=64-hex-entity-secret
+CIRCLE_SENDER_WALLET_ID=circle-wallet-uuid
+# Live transfer policy — mandatory for circle-arc; transfers fail closed
+# with policy_rejected when either value is absent or invalid.
+WDK_MAX_TRANSFER_AMOUNT=0.05
+WDK_ALLOWED_RECIPIENTS=0x1111111111111111111111111111111111111111
+```
+
+Trust model: Circle holds the wallet keys server-side under the developer
+entity. The backend holds the entity secret as a production-grade secret
+(never logged, never sent to any client); the user's device never signs.
+Arc TESTNET only: chain id 5042002, USDC (18 decimals) exclusively, and no
+mainnet configuration exists. The RPC chain id is verified before every
+finality check, and a receipt that does not echo the requested hash can
+never confirm a transfer.
+
+`compose.yaml` pins no wallet variables; `.env` interpolation alone drives
+`WDK_TOOLS_SOURCE=circle-arc` (verified with `docker compose config`). No
+compose change is required.
+
+`/health` gains an additive optional `provider` field under this mode:
+`provider.status` is `healthy` when the Circle wallet responds, or
+`unavailable` with a reason that never contains credential values. The
+legacy `mode` (`live`), `network` (`arc-testnet`), `mcp`, and `wallet`
+fields keep their meaning. `docs/api.md` is intentionally left untouched:
+`/health` is not a `/v1` route and no `/v1` request/response shape changed.
+
+### Manual E2E (real Circle credentials, real testnet USDC)
+
+Explicit user consent is required before running any step: this exercise
+moves real testnet USDC funded from a faucet and depends on live Circle and
+Arc testnet services. Keep `WDK_MAX_TRANSFER_AMOUNT` small.
+
+1. Set the environment above with real credentials and policy values, then
+   boot the API (`npm run dev`) or `docker compose up`.
+2. `curl -fsS http://localhost:3000/health | jq` — expect `mode: live`,
+   `network: arc-testnet`, and `provider.status: healthy`.
+3. Voice: ask for the balance (a real Arc RPC USDC value), then request a
+   preview→confirm transfer below `WDK_MAX_TRANSFER_AMOUNT` to an
+   allowlisted recipient. Confirm the narration never claims the transfer
+   was sent before the on-chain receipt is verified.
+4. Text: run the same preview→confirm through the typed API and verify the
+   Confirm/Cancel card links to `testnet.arcscan.app/tx/{hash}`.
+5. Negative: attempt an over-limit transfer and a non-allowlisted
+   recipient; both must narrate `policy_rejected` without broadcasting.
+6. Fund check: confirm the Arcscan transaction shows a real USDC transfer.
+   The demo stays testnet-only.
+
 ## Decision and recovery checks
 
 1. Request a small transfer and inspect network, token, destination, amount, and fee.

@@ -122,6 +122,35 @@ describe('createWalletProvider selection', () => {
   });
 });
 
+describe('createWalletProvider circle-arc boot guard (D8)', () => {
+  const base = {
+    WDK_TOOLS_SOURCE: 'circle-arc',
+    CIRCLE_API_KEY: 'k',
+    CIRCLE_ENTITY_SECRET: 'a'.repeat(64),
+    CIRCLE_SENDER_WALLET_ID: 'w',
+  } as const;
+
+  it('throws at boot when WDK_NETWORK is set to a non arc-testnet value', () => {
+    expect(() => createWalletProvider({ ...base, WDK_NETWORK: 'sepolia' })).toThrow(CircleArcConfigError);
+    expect(() => createWalletProvider({ ...base, WDK_NETWORK: 'sepolia' })).toThrow(/WDK_NETWORK=arc-testnet/);
+  });
+
+  it('throws at boot when WDK_TOKEN is set to a non-USDC value', () => {
+    expect(() => createWalletProvider({ ...base, WDK_TOKEN: 'USDT' })).toThrow(CircleArcConfigError);
+    expect(() => createWalletProvider({ ...base, WDK_TOKEN: 'USDT' })).toThrow(/WDK_TOKEN=USDC/);
+  });
+
+  it('builds the circle-arc provider under the testnet-only configuration', () => {
+    const wallet = createWalletProvider({
+      ...base,
+      WDK_NETWORK: ARC_TESTNET_NETWORK,
+      WDK_TOKEN: 'USDC',
+    });
+    expect(wallet.id).toBe('circle-arc');
+    expect(wallet.mode).toBe('live');
+  });
+});
+
 describe('CircleArcProvider reads', () => {
   it('reports the Arc Testnet network and USDC token', async () => {
     expect(await provider({}).listNetworks()).toEqual([{ network: ARC_TESTNET_NETWORK, kind: 'testnet' }]);
