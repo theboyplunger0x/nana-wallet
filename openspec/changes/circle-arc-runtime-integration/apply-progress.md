@@ -1,6 +1,57 @@
 # Apply Progress: circle-arc-runtime-integration
 
-## Batch 1 = PR A (this run)
+## Batch 2 = PR B (this run)
+
+Scope: PR B of 3 stacked PRs — tasks 4.2, 4.3 (completion of batch 4), and batch 5 (health contract, D5) + D6 explorer URL. Batches 6–7 (PR C) untouched.
+
+### Completed tasks (all checked off in tasks.md)
+
+- 4.2: `normalizeBroadcastResult` now uses `explorerUrlFor(network, hash)` (arc-testnet → `https://testnet.arcscan.app/tx/`, sepolia → etherscan; `src/wdk` provider URL untouched, CAR-015).
+- 4.3: (a) explorer tests for arc-testnet/sepolia in `wallet-agent-definition.test.ts`; (b) waiter-selection matrix — provider-present reverted → `transfer_reverted` and throw → `transaction_receipt_invalid` were already pinned by PR A's seam tests; this run added the provider-absent legacy path (fixture-mode confirm via `defaultTransactionReceiptWaiter`'s immediate outcome, zero provider calls) and the precedence test (injected `transactionReceiptWaiter` wins over `walletProvider.waitForFinality`, which must never run in parallel).
+- 5.1: `healthResponseSchema` gains additive optional `provider: { status: 'healthy'|'degraded'|'unavailable', reason? }`. Only `/v1`-adjacent change; no `/v1` request/response shape touched.
+- 5.2: `/health` route calls `dependencies.wallet.health({ wallet: WALLET(), network: NETWORK() })` and includes the `provider` field; legacy fields and lazy env reads unchanged. A throwing `health()` degrades to `{ status: 'unavailable', reason: 'The wallet provider health check failed.' }` — the raw error is intentionally NOT echoed (SDK errors can interpolate config; CAR-017).
+- 5.3: new `tests/unit/health-route.test.ts` (5 tests): healthy no-reason, unavailable with scrubbed reason + legacy fields intact, credential-scrub assertion (CAR-017), throw-degradation, and fixture-mode parity (`mode:'fixture'`, `network:'sepolia'`). Circle-arc env → `mode:'live'`, `network:'arc-testnet'` asserted in the healthy/unavailable cases.
+- 5.4: frontend mirror VERIFIED — `apps/nana-wallet/src/lib/api-types.ts` (250 lines) contains only `/v1` domain types; grep found zero `health` references anywhere in `apps/nana-wallet/src/`. No source change needed; additive optional field is a consumer no-op.
+
+### Files changed (this run)
+
+- `src/agent/definition.ts` — `normalizeBroadcastResult` → `explorerUrlFor` (import added from `../wallet/provider.js`).
+- `src/contracts/http.ts` — `healthResponseSchema` additive optional `provider` object.
+- `src/api/health.ts` — route calls provider `health()` and includes the field; new private `providerHealth()` helper with fail-closed throw mapping.
+- Tests: `tests/unit/health-route.test.ts` (new), `tests/unit/wallet-agent-definition.test.ts` (+2 explorer tests), `tests/unit/wallet-agent-confirm-seam.test.ts` (+2 waiter-selection tests in a new describe).
+- `apps/nana-wallet`: no change (5.4 verified, nothing to mirror).
+
+### Verification evidence (exact commands, in the worktree `/Users/ramiro/Desktop/projects/personales/aleph-hackathon.arc-migration`)
+
+| Command | Result |
+| --- | --- |
+| `npm run lint` (`eslint src tests --max-warnings=0`) | exit 0 |
+| `npm run typecheck` (`tsc -p tsconfig.test.json --noEmit`) | exit 0 |
+| `npx vitest run tests/unit/health-route.test.ts tests/unit/wallet-agent-definition.test.ts tests/unit/wallet-agent-confirm-seam.test.ts tests/integration/api-health.test.ts` | 4 files / 32 tests passed |
+| `npm test` (full Vitest suite) | 70 files passed, 8 skipped; 417 passed, 17 skipped — no regression on fixture/live/WDK paths |
+
+Standard Mode (strict_tdd: false per tasks.md): tests written alongside each change.
+
+### Deviations from design
+
+- None material. 4.1 (PR A) + this run complete batch 4 as sliced by the parent. The route-level health-throw mapping (generic reason instead of raw error) is a stricter-than-design safety choice aligned with D5's CAR-017 requirement.
+
+### Remaining tasks (unchecked)
+
+- Batch 6 (6.1–6.5: D8 boot guard, `.env.example`, compose check, runbook docs) and Batch 7 (7.1–7.4: root gates already green this run, frontend suite, fake-Circle integration test, manual E2E — 7.4 intentionally unchecked for the user) — PR C.
+- Post-Apply Review (`<!-- sdd-owner: parent -->`) — parent-owned deferred lifecycle action.
+
+### Workload / PR boundary
+
+- PR B of 3 stacked PRs (parent-resolved delivery path: 3 stacked, size:ok ≤400 lines).
+- Diff vs PR A commit (d360a91): 5 files, +130/−3 lines — well inside budget.
+
+### Notes
+
+- Engram unreachable (`127.0.0.1:7437` down) in the PR A run; artifact store for this change remains the openspec files in the worktree. This file is cumulative: Batch 1 section (PR A) below is preserved unchanged.
+- No git commit performed (parent owns commits).
+
+## Batch 1 = PR A (previous run)
 
 Scope: design batches 1–3 (tasks batches 1, 2, 3) + the D3/D7 confirm-path seam. PR B/C (batches 4–6, fake-Circle integration) untouched.
 
