@@ -6,6 +6,12 @@ export const healthResponseSchema = z.object({
   mcp: z.enum(["connected", "disconnected", "unknown"]),
   wallet: z.enum(["unlocked", "locked", "unknown"]),
   network: z.string(),
+  provider: z
+    .object({
+      status: z.enum(["healthy", "degraded", "unavailable"]),
+      reason: z.string().optional(),
+    })
+    .optional(),
 });
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 

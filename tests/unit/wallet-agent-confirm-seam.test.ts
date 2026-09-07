@@ -198,3 +198,80 @@ describe('confirm-path provider seam', () => {
     expect(session.pendingTransfer).toBeUndefined();
   });
 });
+
+describe('receipt-waiter selection (D3, task 4.3)', () => {
+  const previous = new Map<string, string | undefined>([
+    ['WDK_TOOLS_SOURCE', process.env.WDK_TOOLS_SOURCE],
+    ['WDK_NETWORK', process.env.WDK_NETWORK],
+    ['WDK_TOKEN', process.env.WDK_TOKEN],
+    ['WDK_WALLET_NAME', process.env.WDK_WALLET_NAME],
+  ]);
+
+  afterEach(() => {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetSessionStore();
+  });
+
+  it('keeps the legacy provider-absent path on defaultTransactionReceiptWaiter (fixture immediate confirm)', async () => {
+    resetSessionStore();
+    process.env.WDK_TOOLS_SOURCE = 'fixture';
+    process.env.WDK_NETWORK = 'sepolia';
+    process.env.WDK_TOKEN = 'USDT';
+    process.env.WDK_WALLET_NAME = 'agent-demo';
+
+    const session = createSession();
+    (session as { pendingTransfer?: PendingTransfer }).pendingTransfer = {
+      ...pendingFixture,
+      network: 'sepolia',
+      token: 'USDT',
+    };
+    const { provider, calls } = fakeWalletProvider({});
+
+    const result = await handleMessage(session, 'confirm');
+
+    // The legacy path broadcasts through the WDK fixture tools and verifies via
+    // defaultTransactionReceiptWaiter's immediate fixture outcome — no provider
+    // waitForFinality call, and the sepolia etherscan URL survives D6.
+    expect(result).toMatchObject({
+      status: 'sent',
+      message: 'Transfer confirmed.',
+      transaction: {
+        network: 'sepolia',
+        transactionHash: '0x' + '1'.padStart(64, '0'),
+        explorerUrl: 'https://sepolia.etherscan.io/tx/0x' + '1'.padStart(64, '0'),
+      },
+    });
+    expect(broadcastCalls(calls)).toBe(0);
+    expect(calls.finality).toHaveLength(0);
+    expect(provider.waitForFinality).not.toHaveBeenCalled();
+  });
+
+  function pendingSession(): ConversationSession {
+    const session = createSession();
+    (session as { pendingTransfer?: PendingTransfer }).pendingTransfer = { ...pendingFixture };
+    return session;
+  }
+
+  it('prefers an explicitly injected receipt waiter over the provider and fails closed on its error', async () => {
+    const session = pendingSession();
+    const { provider, calls } = fakeWalletProvider({});
+
+    const result = await handleMessage(session, 'confirm', {
+      walletProvider: provider,
+      transactionReceiptWaiter: async () => {
+        throw new Error('injected waiter deadline exceeded');
+      },
+    });
+
+    expect(result).toMatchObject({ status: 'error', code: 'transaction_receipt_invalid' });
+    expect(result.message).toContain('injected waiter deadline exceeded');
+    expect(broadcastCalls(calls)).toBe(1);
+    // The injected waiter is the single verification source: the provider's
+    // waitForFinality must never run in parallel.
+    expect(calls.finality).toHaveLength(0);
+    expect(provider.waitForFinality).not.toHaveBeenCalled();
+  });
+});

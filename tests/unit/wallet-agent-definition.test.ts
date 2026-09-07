@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createWalletAgentDefinition,
+  normalizeBroadcastResult,
   normalizeWalletToken,
   validateWalletTransferPolicy,
   type WalletAgentContext,
@@ -160,5 +161,35 @@ error: 'policy_rejected',
     delete process.env.WDK_MAX_TRANSFER_AMOUNT;
     delete process.env.WDK_ALLOWED_RECIPIENTS;
     expect(validateWalletTransferPolicy(gateInput(), context().config)).toBeUndefined();
+  });
+});
+
+describe('normalizeBroadcastResult explorer URL (D6, CAR-010)', () => {
+  const HASH = `0x${'ab'.repeat(32)}`;
+
+  it('links arc-testnet broadcasts to the Arcscan explorer', () => {
+    const result = normalizeBroadcastResult(
+      { network: 'arc-testnet', transactionHash: HASH, explorerUrl: 'ignored' },
+      'arc-testnet',
+    );
+
+    expect(result).toEqual({
+      network: 'arc-testnet',
+      transactionHash: HASH,
+      explorerUrl: `https://testnet.arcscan.app/tx/${HASH}`,
+    });
+  });
+
+  it('keeps the sepolia etherscan URL unchanged', () => {
+    const result = normalizeBroadcastResult(
+      { network: 'sepolia', transactionHash: HASH, explorerUrl: 'ignored' },
+      'sepolia',
+    );
+
+    expect(result).toEqual({
+      network: 'sepolia',
+      transactionHash: HASH,
+      explorerUrl: `https://sepolia.etherscan.io/tx/${HASH}`,
+    });
   });
 });

@@ -31,6 +31,18 @@ export async function registerHealthRoutes(app: FastifyInstance, dependencies: {
       }
     }
 
-    return { status: 'ok', mode: MODE(), mcp, wallet, network: NETWORK() };
-  });
+      return { status: 'ok', mode: MODE(), mcp, wallet, network: NETWORK(), provider: await providerHealth(dependencies.wallet) };
+    });
+}
+
+// D5: the provider health result is additive and provider-agnostic. A health()
+// implementation that throws must still yield an honest 'unavailable' envelope,
+// and its reason is intentionally NOT the raw error message: SDK errors can
+// interpolate configuration values, which CAR-017 forbids on the health route.
+async function providerHealth(wallet: WalletProvider): Promise<HealthResponse['provider']> {
+  try {
+    return await wallet.health({ wallet: WALLET(), network: NETWORK() });
+  } catch {
+    return { status: 'unavailable', reason: 'The wallet provider health check failed.' };
+  }
 }

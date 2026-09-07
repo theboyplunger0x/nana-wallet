@@ -6,6 +6,7 @@ import type { RecipientMemoryRuntime } from '../memory/runtime.js';
 import { createRecipientMemoryTools } from '../memory/tools.js';
 import { isValidEvmAddress } from '../memory/address.js';
 import type { WalletProvider, TransferRequest } from '../wallet/provider.js';
+import { explorerUrlFor } from '../wallet/provider.js';
 import { decodeMcpText } from '../wdk/mcp-client.js';
 import { transactionResultSchema, transferPreviewSchema, type TransferPreview } from '../contracts/http.js';
 
@@ -136,7 +137,7 @@ export function normalizeBroadcastResult(output: unknown, network: string) {
   const result = transactionResultSchema.safeParse({
     network,
     transactionHash: hash,
-    explorerUrl: `https://sepolia.etherscan.io/tx/${hash}`,
+    explorerUrl: explorerUrlFor(network, hash),
   });
   return result.success ? result.data : null;
 }
