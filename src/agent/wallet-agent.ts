@@ -221,7 +221,7 @@ function validateLiveTransferPolicy(
 
 const transactionReceiptOutcomeSchema = z.object({
   status: z.enum(['confirmed', 'reverted']),
-  network: z.literal('sepolia'),
+  network: z.string().min(1),
   transactionHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/u),
 });
 

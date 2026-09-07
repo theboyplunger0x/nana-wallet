@@ -8,7 +8,7 @@ const EVM_TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/u;
 
 export type TransactionReceiptOutcome = {
   status: 'confirmed' | 'reverted';
-  network: 'sepolia';
+  network: string;
   transactionHash: string;
 };
 
