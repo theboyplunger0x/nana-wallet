@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { buildServer } from '../../src/server.js';
+import { describe, expect, it, vi } from 'vitest';
 
 // Hermetic: the local development .env may select live wallet mode; these tests
-// assert the fixture-mode health contract.
-process.env.WDK_TOOLS_SOURCE = 'fixture';
+// assert the fixture-mode health contract. The pins run before the server
+// import because dotenv evaluates the ambient .env during that import chain.
+vi.hoisted(() => {
+  process.env.WDK_TOOLS_SOURCE = 'fixture';
+  process.env.WDK_NETWORK = 'sepolia';
+  process.env.WDK_TOKEN = 'USDT';
+});
+
+import { buildServer } from '../../src/server.js';
 
 describe('GET /health', () => {
   it('reports ok status with mcp and wallet state', async () => {
