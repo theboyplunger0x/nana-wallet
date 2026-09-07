@@ -776,6 +776,14 @@ function spokenResultMessage(result: ConversationTurnResult, language: 'es' | 'e
 }
 
 function errorResult(error: unknown): Extract<ConversationTurnResult, { status: 'error' }> {
+  if (!(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string')) {
+    // Unexpected failures must be visible in the process log; the generic
+    // internal_error response alone made live diagnostics impossible.
+    console.error(
+      "[conversation] unexpected turn failure:",
+      error instanceof Error ? error.stack : error,
+    );
+  }
   if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
     const code = error.code as ConversationErrorCode;
     return { status: 'error', code, message: safeErrorMessage(code) };
