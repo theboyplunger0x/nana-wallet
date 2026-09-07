@@ -79,7 +79,7 @@ services:
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
     volumes:
-      - "${WDK_CONFIG_DIR:-$HOME/.config/wdk-cli}:/wdk-config/wdk-cli"
+      - wdk_config:/wdk-config
     ports:
       - "127.0.0.1:${BACKEND_HOST_PORT:-3000}:3000"
     depends_on:
@@ -123,11 +123,27 @@ services:
       RECIPIENT_MEMORY_SEED_FILE: "examples/recipient-memory.seed.json"
       XDG_CONFIG_HOME: "/wdk-config"
     volumes:
-      - "${WDK_CONFIG_DIR:-$HOME/.config/wdk-cli}:/wdk-config/wdk-cli"
+      - wdk_config:/wdk-config
     depends_on:
       db:
         condition: service_healthy
     command: ["worker"]
 
+  wdk-daemon:
+    profiles: ["daemon"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Root on purpose: the daemon is the only process that reads the encrypted
+    # wallet store; backend/worker only connect to its socket (world-connectable
+    # via umask), so they keep running as the unprivileged node user.
+    user: "0:0"
+    entrypoint: ["sh", "-c", "umask 000 && exec node node_modules/@tetherto/wdk-cli/bin/wdk-daemon.mjs"]
+    environment:
+      XDG_CONFIG_HOME: "/wdk-config"
+    volumes:
+      - wdk_config:/wdk-config
+
 volumes:
   recipient_memory_postgres:
+  wdk_config:
