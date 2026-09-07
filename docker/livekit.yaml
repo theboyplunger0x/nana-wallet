@@ -12,6 +12,9 @@ rtc:
   # No TURN, no TCP relay override, no egress.
   use_external_ip: false
   node_ip: "127.0.0.1"
+  # Also advertise the container interface IP so the voice-worker (on the
+  # compose network) keeps its host-candidate path to media.
+  advertise_internal_ip: true
   tcp_port: 7881 # ICE-TCP fallback for the browser; published on loopback only
 # Credentials: livekit-server does not expand ${VAR} inside its config file
 # (verified against v1.13.6), so the key/secret pair is injected by the compose
