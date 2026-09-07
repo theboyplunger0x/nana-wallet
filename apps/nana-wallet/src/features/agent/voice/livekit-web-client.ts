@@ -46,10 +46,11 @@ function readConfig(options: LiveKitWebClientOptions): LiveKitClientConfig {
       options.agentName ?? import.meta.env["VITE_LIVEKIT_AGENT_NAME"] ?? "nani-agent";
     return { tokenSource: "cloud", tokenServerId, agentName, participantIdentity };
   }
-  if (source !== undefined)
-    throw new Error(`Unknown VITE_LIVEKIT_TOKEN_SOURCE value: ${source}. Use "local" or "cloud".`);
-  if (!participantIdentity) throw new Error("Live voice is not configured for this browser.");
-  return { tokenSource: "local", participantIdentity };
+  if (source === "local" || source === undefined) {
+    if (!participantIdentity) throw new Error("Live voice is not configured for this browser.");
+    return { tokenSource: "local", participantIdentity };
+  }
+  throw new Error(`Unknown VITE_LIVEKIT_TOKEN_SOURCE value: ${source}. Use "local" or "cloud".`);
 }
 
 /** Decodes the JWT payload (base64url) to sanity-check the identity the server signed. */

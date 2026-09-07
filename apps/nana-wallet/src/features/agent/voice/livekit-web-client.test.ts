@@ -125,6 +125,26 @@ describe("livekit web client token source", () => {
     expect(mocks.developmentTokenServer).not.toHaveBeenCalled();
   });
 
+  it("accepts an explicit VITE_LIVEKIT_TOKEN_SOURCE=local the same as the unset default", async () => {
+    setEnv("VITE_LIVEKIT_TOKEN_SOURCE", "local");
+    const participantToken = tokenWithIdentity(PARTICIPANT_IDENTITY);
+    mocks.fetchVoiceRoomToken.mockResolvedValue({
+      serverUrl: SERVER_URL,
+      participantToken,
+      roomName: `nani-${CONVERSATION_ID}`,
+    });
+    const fakeRoom = createFakeRoom();
+
+    const client = createLiveKitWebClient({ room: fakeRoom });
+    await expect(client.connect()).resolves.toEqual({
+      conversationId: CONVERSATION_ID,
+      revision: 3,
+    });
+
+    expect(mocks.fetchVoiceRoomToken).toHaveBeenCalledWith(CONVERSATION_ID);
+    expect(mocks.developmentTokenServer).not.toHaveBeenCalled();
+  });
+
   it("keeps the cloud development token server path when VITE_LIVEKIT_TOKEN_SOURCE=cloud", async () => {
     setEnv("VITE_LIVEKIT_TOKEN_SOURCE", "cloud");
     setEnv("VITE_LIVEKIT_TOKEN_SERVER_ID", "dev-token-server");
