@@ -25,9 +25,8 @@ services:
       - ./docker/livekit.yaml:/etc/livekit.yaml:ro
     ports:
       - "127.0.0.1:7880:7880" # WebSocket/RTC signaling (TCP)
-      - "127.0.0.1:7881:7881/udp" # RTC media (UDP)
-      - "127.0.0.1:7881:7881/tcp" # ICE-TCP fallback for the host browser
-      - "127.0.0.1:60000-60100:60000-60100/udp" # RTC media range
+      - "7881-7891:7881-7891/udp" # RTC media (UDP)
+      - "7881:7881/tcp" # ICE-TCP fallback for the host browser
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880/"]
       interval: 10s
@@ -67,7 +66,7 @@ services:
       # network; LIVEKIT_BROWSER_URL (browser-facing URL) comes from the
       # git-ignored .env and must stay ws://localhost:7880 so the browser
       # connects to the loopback-published livekit service.
-      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_URL: "${LIVEKIT_DOCKER_URL:-ws://livekit:7880}"
       LIVEKIT_BROWSER_URL: "${LIVEKIT_BROWSER_URL:-ws://localhost:7880}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
@@ -97,7 +96,7 @@ services:
       # Register with the self-hosted server over the compose network.
       # LIVEKIT_API_KEY/SECRET, binding keys and OPENAI_API_KEY also come
       # from the git-ignored .env via env_file.
-      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_URL: "${LIVEKIT_DOCKER_URL:-ws://livekit:7880}"
     depends_on:
       db:
         condition: service_healthy

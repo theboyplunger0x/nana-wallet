@@ -3,9 +3,11 @@
 # stays on loopback (LLS-001/LLS-009).
 port: 7880
 rtc:
-  udp_port: 7881
-  port_range_start: 60000
-  port_range_end: 60100
+  # Single small UDP mux range for local development media.
+  # NOTE: `port_range_start/end` keys are NOT honored by v1.13.6 (verified
+  # against the server log: Start/End stayed 0); the honored key is
+  # rtc.udp_port as a "start-end" string.
+  udp_port: "7881-7891"
   # Loopback demo topology: advertise 127.0.0.1 so the HOST browser can
   # reach the published media ports. Container clients (voice-worker) still
   # use the interface host candidates (172.x), so both paths work.
