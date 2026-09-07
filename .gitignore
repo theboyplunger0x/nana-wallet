@@ -19,3 +19,6 @@ supabase/.temp/
 
 # Voice eval dataset (downloaded audio, never committed)
 evals/voice/.audio/
+
+# local model cache from arc provider experiments
+recipient-memory-model/

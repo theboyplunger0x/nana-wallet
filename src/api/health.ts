@@ -7,7 +7,8 @@ const WALLET = () => process.env.WDK_WALLET_NAME ?? 'agent-demo';
 // Read lazily: module-level constants froze the ambient .env at import time and
 // made the health contract depend on dotenv evaluation order (hermetic tests pin
 // the env before building the server).
-const MODE = () => (process.env.WDK_TOOLS_SOURCE === 'live' ? 'live' : 'fixture');
+    const MODE = () =>
+      process.env.WDK_TOOLS_SOURCE === 'live' || process.env.WDK_TOOLS_SOURCE === 'circle-arc' ? 'live' : 'fixture';
 
 export async function registerHealthRoutes(app: FastifyInstance, dependencies: { wallet: WalletProvider }): Promise<void> {
   app.get('/health', async (): Promise<HealthResponse> => {

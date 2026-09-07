@@ -6,6 +6,10 @@ import {
 import type { Tool } from "ai";
 import { FixtureWalletProvider } from "../wallet/fixture-provider.js";
 import { WdkWalletProvider } from "../wallet/wdk-provider.js";
+import {
+  CircleArcProvider,
+  readCircleArcProviderConfig,
+} from "../wallet/circle-arc-provider.js";
 import type { WalletProvider } from "../wallet/provider.js";
 import {
   createConfiguredDatabaseClient,
@@ -46,6 +50,9 @@ export type WorkerDependencies = CoreDependencies & {
 export function createWalletProvider(
   environment: NodeJS.ProcessEnv = process.env,
 ): WalletProvider {
+  if (environment.WDK_TOOLS_SOURCE === "circle-arc") {
+    return new CircleArcProvider(readCircleArcProviderConfig(environment));
+  }
   if (environment.WDK_TOOLS_SOURCE === "live") {
     return new WdkWalletProvider(getWdkTools, closeWdkClient);
   }
@@ -57,7 +64,8 @@ export function createCoreDependencies(
 ): CoreDependencies {
   const wallet = createWalletProvider(environment);
   const walletReads =
-    environment.WDK_TOOLS_SOURCE === "live"
+    environment.WDK_TOOLS_SOURCE === "live" ||
+    environment.WDK_TOOLS_SOURCE === "circle-arc"
       ? wallet
       : new WdkWalletProvider(async () => legacyToolSource());
   const maxInputTokens = Number(environment.CONVERSATION_MAX_INPUT_TOKENS ?? 4096);
