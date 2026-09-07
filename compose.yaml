@@ -16,5 +16,22 @@ services:
       timeout: 5s
       retries: 20
 
+  livekit:
+    image: livekit/livekit-server:v1.13.6
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./docker/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "127.0.0.1:7880:7880" # WebSocket/RTC signaling (TCP)
+      - "127.0.0.1:7881:7881/udp" # RTC media (UDP)
+      - "127.0.0.1:60000-60100:60000-60100/udp" # RTC media range
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 volumes:
   recipient_memory_postgres:

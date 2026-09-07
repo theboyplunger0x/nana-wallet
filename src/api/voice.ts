@@ -2,9 +2,20 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   agentTranscribeRequestSchema,
   voiceSpeakRequestSchema,
+  voiceRoomTokenRequestSchema,
   type AgentTranscribeResponse,
+  type VoiceRoomTokenResponse,
 } from '../contracts/http.js';
 import { readElevenLabsApiKey } from '../config/privacy.js';
+import type { RoomTokenInput, RoomTokenResult } from '../livekit/token-issuer.js';
+
+export type LiveKitTokenIssuerDependency = {
+  issue: (input: RoomTokenInput) => Promise<RoomTokenResult>;
+};
+
+export type VoiceRoutesOptions = {
+  liveKitTokenIssuer?: LiveKitTokenIssuerDependency;
+};
 
 const NAN_BASE_URL = process.env.NAN_BASE_URL ?? 'https://api.nan.builders/v1';
 const NAN_STT_MODEL = process.env.NAN_STT_MODEL ?? 'whisper';
@@ -41,7 +52,10 @@ async function transcribeWithWhisper(audio: Buffer, mimeType: string): Promise<s
   return result.text ?? '';
 }
 
-export async function registerVoiceRoutes(app: FastifyInstance): Promise<void> {
+export async function registerVoiceRoutes(
+  app: FastifyInstance,
+  options: VoiceRoutesOptions = {},
+): Promise<void> {
   app.post(
     '/v1/agent/transcribe',
     async (
@@ -117,4 +131,38 @@ export async function registerVoiceRoutes(app: FastifyInstance): Promise<void> {
     reply.header('content-type', 'audio/mpeg');
     return reply.send(Buffer.from(await upstream.arrayBuffer()));
   });
+
+  app.post(
+    '/v1/voice/room-token',
+    async (request: FastifyRequest<{ Body: unknown }>, reply): Promise<VoiceRoomTokenResponse | void> => {
+      const parsed = voiceRoomTokenRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.code(400);
+        return reply.send({ status: 'error', message: parsed.error.message, code: 'invalid_body' });
+      }
+
+      const issuer = options.liveKitTokenIssuer;
+      if (!issuer) {
+        reply.code(503);
+        return reply.send({
+          status: 'error',
+          message: 'LiveKit room token issuance is not configured on this API.',
+          code: 'voice_token_unavailable',
+        });
+      }
+
+      try {
+        // The issuer reads LiveKit credentials lazily per request, so the API
+        // boots fine without LiveKit configuration and fails closed here.
+        return await issuer.issue(parsed.data);
+      } catch (error) {
+        reply.code(503);
+        return reply.send({
+          status: 'error',
+          message: error instanceof Error ? error.message : 'LiveKit room token issuance failed.',
+          code: 'voice_token_unavailable',
+        });
+      }
+    },
+  );
 }
