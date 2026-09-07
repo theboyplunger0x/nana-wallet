@@ -5,7 +5,8 @@ export type LiveKitPrivacyConfig = {
 };
 
 export type LiveKitTokenIssuerConfig = {
-  url: string; // LIVEKIT_URL, non-empty (ws://localhost:7880 locally)
+  url: string; // LIVEKIT_URL, non-empty (server-side: ws://livekit:7880 in compose)
+  browserUrl: string; // LIVEKIT_BROWSER_URL ?? url — browser-facing URL returned in the token response
   apiKey: string; // LIVEKIT_API_KEY
   apiSecret: string; // LIVEKIT_API_SECRET
   defaultAgentName: string; // LIVEKIT_AGENT_NAME ?? 'nani-agent'
@@ -45,6 +46,10 @@ export function readLiveKitTokenIssuerConfig(
 
   return {
     url: environment.LIVEKIT_URL!.trim(),
+    // Browser-facing URL: the API/worker may register over the compose
+    // network (ws://livekit:7880) while the browser must reach the server
+    // through the loopback-published port (ws://localhost:7880).
+    browserUrl: environment.LIVEKIT_BROWSER_URL?.trim() || environment.LIVEKIT_URL!.trim(),
     apiKey: environment.LIVEKIT_API_KEY!.trim(),
     apiSecret: environment.LIVEKIT_API_SECRET!.trim(),
     defaultAgentName: environment.LIVEKIT_AGENT_NAME?.trim() || 'nani-agent',

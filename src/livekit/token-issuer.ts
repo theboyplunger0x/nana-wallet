@@ -48,7 +48,10 @@ export async function issueRoomToken(
   });
 
   return {
-    serverUrl: config.url,
+    // The browser must reach the server through a URL that is valid from
+    // its own network position (loopback in local dev), not necessarily
+    // the server-side registration URL.
+    serverUrl: config.browserUrl,
     participantToken: await token.toJwt(),
     roomName,
   };

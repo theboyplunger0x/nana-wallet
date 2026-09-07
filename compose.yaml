@@ -62,9 +62,14 @@ services:
       LIVE_VOICE_ENABLED: "true"
       AGENT_RUNTIME: "${AGENT_RUNTIME:-llm}"
       OPENCODE_GO_API_KEY: "${OPENCODE_GO_API_KEY:-}"
-      # CORS default already allows the dev frontend on :8083.
-      # For a model-free fixture smoke set AGENT_RUNTIME=deterministic; for the
-      # LLM text flow provide OPENCODE_GO_API_KEY. See docs/local-docker-runbook.md.
+      # Sign room tokens against the self-hosted server over the compose
+      # network; LIVEKIT_BROWSER_URL (browser-facing URL) comes from the
+      # git-ignored .env and must stay ws://localhost:7880 so the browser
+      # connects to the loopback-published livekit service.
+      LIVEKIT_URL: "ws://livekit:7880"
+      LIVEKIT_BROWSER_URL: "${LIVEKIT_BROWSER_URL:-ws://localhost:7880}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
     ports:
       - "3000:3000"
     depends_on:
@@ -88,14 +93,10 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: "postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions"
-      DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
-      WDK_TOOLS_SOURCE: "fixture"
-      WDK_NETWORK: "sepolia"
-      WDK_TOKEN: "USDT"
-      RECIPIENT_MEMORY_ENABLED: "true"
-      # LIVEKIT_URL/API_KEY/API_SECRET, LIVE_VOICE_BINDING_PUBLIC_KEY and
-      # OPENAI_API_KEY come from the git-ignored .env via env_file.
+      # Register with the self-hosted server over the compose network.
+      # LIVEKIT_API_KEY/SECRET, binding keys and OPENAI_API_KEY also come
+      # from the git-ignored .env via env_file.
+      LIVEKIT_URL: "ws://livekit:7880"
     depends_on:
       db:
         condition: service_healthy

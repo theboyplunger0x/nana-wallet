@@ -42,6 +42,36 @@ La API queda en `http://localhost:3000` y el healthcheck en
 > `npm run memory:prefetch` corre sin credenciales (no requiere
 > `DATABASE_URL`/`DEMO_USER_ID`), así que se puede bakear.
 
+## Voz live contra el LiveKit self-hosted (default local)
+
+El mismo stack Docker incluye el server LiveKit self-hosted (servicio `livekit`,
+pinned `v1.13.6`, puertos publicados solo en `127.0.0.1`, sin egress/recording):
+
+```bash
+# Levanta Postgres + API + LiveKit self-hosted:
+docker compose --profile dev up -d --build
+
+# Suma el worker de voz (se registra contra ws://livekit:7880 interno):
+docker compose --profile dev --profile worker up -d --build
+```
+
+Requisitos en el `.env` (git-ignored): `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
+`OPENAI_API_KEY`, `LIVE_VOICE_BINDING_PUBLIC_KEY` y
+`LIVE_VOICE_BINDING_PRIVATE_KEY`. La URL del server **no** va en el `.env`
+para este modo: la API y el worker la fijan por compose (`ws://livekit:7880`).
+
+Dos URLs para LiveKit (ambas necesarias cuando el backend corre en Docker):
+
+| Variable | Valor | Para qué |
+| --- | --- | --- |
+| `LIVEKIT_URL` (compose) | `ws://livekit:7880` | Registro del worker y firma de tokens dentro de la red de compose. |
+| `LIVEKIT_BROWSER_URL` (.env, default `ws://localhost:7880`) | `ws://localhost:7880` | `serverUrl` que la API devuelve al browser; debe ser alcanzable desde el navegador. |
+
+La firma del room token es del backend (`POST /v1/voice/room-token`); el front
+usa `VITE_LIVEKIT_TOKEN_SOURCE=local` (default). Contrato de privacidad sin
+cambios: `record: false`, sin Egress, sin observability recording, audio solo
+por loopback.
+
 ## Aplicar el esquema de la base
 
 El init de Postgres (`docker/init/001-recipient-app.sql`) crea solo el rol

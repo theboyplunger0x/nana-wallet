@@ -213,3 +213,16 @@ The backend MUST own token issuance and MUST be server-authoritative for room na
 - GIVEN `src/api/voice.ts` imports `livekit-server-sdk`
 - WHEN `package.json` is inspected
 - THEN `livekit-server-sdk` is declared as an explicit root dependency
+
+## Amendment (docker full-stack wiring, 2026-09-06)
+
+- **LLS-002 (amended):** the token response `serverUrl` is the **browser-facing**
+  LiveKit URL, sourced from `LIVEKIT_BROWSER_URL` when set, defaulting to
+  `LIVEKIT_URL`. Rationale: when the backend runs in compose, `LIVEKIT_URL`
+  points at the internal service (`ws://livekit:7880`), which is unreachable
+  from the browser; the browser must connect through the loopback-published
+  port (`ws://localhost:7880`).
+- **LLS-001 (amended):** the self-hosted server also serves the docker
+  full-stack flow: backend and voice-worker services (existing docker stack)
+  register/sign against the internal `livekit` compose service while the
+  browser connects via `LIVEKIT_BROWSER_URL`.

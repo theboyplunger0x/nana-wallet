@@ -18,7 +18,8 @@ import {
 const CONVERSATION_ID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
 
 const baseIssuerConfig: IssuerConfig = {
-  url: "ws://localhost:7880",
+  url: "ws://livekit:7880",
+  browserUrl: "ws://localhost:7880",
   apiKey: "devkey",
   apiSecret: "devsecret-for-unit-tests-only",
   defaultAgentName: "nani-agent",
@@ -31,7 +32,6 @@ const baseReaderEnv: NodeJS.ProcessEnv = {
   LIVEKIT_API_KEY: "devkey",
   LIVEKIT_API_SECRET: "devsecret",
 };
-
 function decodePayload(token: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
 }
@@ -180,6 +180,25 @@ describe("readLiveKitTokenIssuerConfig", () => {
       LIVEKIT_URL: "wss://example.livekit.cloud",
     });
     expect(config.url).toBe("wss://example.livekit.cloud");
+    // Without an override the browser-facing URL defaults to the server URL.
+    expect(config.browserUrl).toBe("wss://example.livekit.cloud");
+  });
+
+  it("uses LIVEKIT_BROWSER_URL as the browser-facing URL when set", () => {
+    const config: LiveKitTokenIssuerConfig = readLiveKitTokenIssuerConfig({
+      ...baseReaderEnv,
+      LIVEKIT_URL: "ws://livekit:7880",
+      LIVEKIT_BROWSER_URL: "ws://localhost:7880",
+    });
+    expect(config.url).toBe("ws://livekit:7880");
+    expect(config.browserUrl).toBe("ws://localhost:7880");
+  });
+
+  it("returns the browser-facing URL as serverUrl while the token signs for the room", async () => {
+    const result = await issueRoomToken(baseIssuerConfig, { conversationId: CONVERSATION_ID });
+    expect(result.serverUrl).toBe("ws://localhost:7880");
+    const payload = decodePayload(result.participantToken);
+    expect((payload.video as { room?: string } | undefined)?.room).toBe(`nani-${CONVERSATION_ID}`);
   });
 });
 

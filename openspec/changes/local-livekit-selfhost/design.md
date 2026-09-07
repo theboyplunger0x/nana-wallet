@@ -265,3 +265,17 @@ keys:
 ```
 
 No database dependency, no volume, no network beyond the default compose network; the service starts with `docker compose up -d livekit` and is reachable at `ws://localhost:7880` (LLS-001).
+
+## Amendment: docker full-stack wiring (2026-09-06)
+
+User request: run the whole local stack in Docker (deploy-test-env stack ported
+into this branch via cherry-picks fae3b8f/00a8829/966def4). Decisions:
+
+- `voice-worker` compose service sets `LIVEKIT_URL: ws://livekit:7880` (internal
+  registration), `backend` sets it for token signing too.
+- New optional env `LIVEKIT_BROWSER_URL` in `readLiveKitTokenIssuerConfig`
+  (default: `LIVEKIT_URL`); `issueRoomToken` returns it as `serverUrl`.
+  Compose sets it to `ws://localhost:7880`.
+- `docker/livekit.yaml` and the loopback-only port publishing are unchanged.
+- Frontend unchanged: same `VITE_LIVEKIT_TOKEN_SOURCE=local` flow, API base
+  `http://localhost:3000`.

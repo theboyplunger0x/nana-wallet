@@ -95,3 +95,9 @@ Rationale: the change touches infra (new compose service + config), backend (con
 ## Post-Apply Review
 
 - [ ] Start or reuse a bounded review of the candidate after the apply phase completes (frozen candidate, at-most-one correction, terminal receipt), covering the infra + backend + frontend + docs slices and the R1 `RoomConfiguration` field-shape check. <!-- sdd-owner: parent -->
+
+## Addendum: docker full-stack wiring (LLS-001/LLS-002 amendment)
+
+- [x] 14.1 Port the deploy-test-env docker stack (Dockerfile, entrypoint, backend/voice-worker services) into this branch and wire them to the self-hosted livekit compose service (LIVEKIT_URL=ws://livekit:7880)
+- [x] 14.2 Add LIVEKIT_BROWSER_URL to readLiveKitTokenIssuerConfig (default LIVEKIT_URL) and return it as serverUrl from issueRoomToken (LLS-002 amendment), with unit tests
+- [x] 14.3 Document the docker voice flow (docs/local-docker-runbook.md) and the new env in .env.example
