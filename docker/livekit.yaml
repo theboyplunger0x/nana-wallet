@@ -6,7 +6,13 @@ rtc:
   udp_port: 7881
   port_range_start: 60000
   port_range_end: 60100
-  # tcp_port, TURN, and egress intentionally absent.
+  # Loopback demo topology: advertise 127.0.0.1 so the HOST browser can
+  # reach the published media ports. Container clients (voice-worker) still
+  # use the interface host candidates (172.x), so both paths work.
+  # No TURN, no TCP relay override, no egress.
+  use_external_ip: false
+  node_ip: "127.0.0.1"
+  tcp_port: 7881 # ICE-TCP fallback for the browser; published on loopback only
 # Credentials: livekit-server does not expand ${VAR} inside its config file
 # (verified against v1.13.6), so the key/secret pair is injected by the compose
 # service via LIVEKIT_KEYS using the same .env credentials the API and worker

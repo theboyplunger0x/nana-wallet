@@ -26,6 +26,7 @@ services:
     ports:
       - "127.0.0.1:7880:7880" # WebSocket/RTC signaling (TCP)
       - "127.0.0.1:7881:7881/udp" # RTC media (UDP)
+      - "127.0.0.1:7881:7881/tcp" # ICE-TCP fallback for the host browser
       - "127.0.0.1:60000-60100:60000-60100/udp" # RTC media range
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880/"]
