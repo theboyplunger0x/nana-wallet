@@ -1,5 +1,6 @@
 services:
   db:
+    restart: unless-stopped
     image: pgvector/pgvector:0.8.1-pg16
     environment:
       POSTGRES_DB: wdk_agent
@@ -24,7 +25,7 @@ services:
     volumes:
       - ./docker/livekit.yaml:/etc/livekit.yaml:ro
     ports:
-      - "127.0.0.1:7880:7880" # WebSocket/RTC signaling (TCP)
+      - "127.0.0.1:7882:7880" # WebSocket/RTC signaling (TCP); 7882 avoids the user ssh tunnel squatting on 127.0.0.1:7880
       - "7881-7891:7881-7891/udp" # RTC media (UDP)
       - "7881:7881/tcp" # ICE-TCP fallback for the host browser
     healthcheck:
@@ -36,6 +37,7 @@ services:
   # starts Postgres + the API. Kept behind `profiles: [dev]` so the CI/tests
   # command `docker compose up -d db` keeps starting only the database.
   backend:
+    restart: unless-stopped
     profiles: ["dev"]
     build:
       context: .
@@ -92,6 +94,7 @@ services:
   # reads required env from the shell and fails closed (throws at startup) if
   # any required value is absent.
   voice-worker:
+    restart: unless-stopped
     profiles: ["worker"]
     build:
       context: .
