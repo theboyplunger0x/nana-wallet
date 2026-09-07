@@ -80,8 +80,7 @@ users (id UUID PK default gen_random_uuid(),
 - Sí: `/v1/me` (identity bootstrap para el front), `/v1/contacts` CRUD +
   reveal, login Privy end-to-end, token plumbing, `users` + RLS, text path
   per-request.
-- No: wallet por usuario (creación vía WDK modular — sprint siguiente,
-  Privy es solo auth), bills/agenda/transfers, Supabase Auth, migración de
+- No: wallet por usuario, bills/agenda/transfers, Supabase Auth, migración de
   datos del demo (queda como seed dev), ZeroDev.
 
 ## D6 — Token plumbing en front
@@ -135,5 +134,5 @@ Front (Privy) → Bearer <access token>
 
 ## Non-goals reafirmados
 
-Wallet por usuario (creación vía WDK modular — sprint siguiente; Privy es
-solo auth), bills/agenda/transfers, Supabase Auth, migración de datos del demo.
+Wallet por usuario (Privy embedded / ZeroDev), bills/agenda/transfers,
+Supabase Auth, migración de datos del demo.

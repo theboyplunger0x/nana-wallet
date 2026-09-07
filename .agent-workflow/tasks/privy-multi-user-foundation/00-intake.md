@@ -48,9 +48,8 @@ D3 de `wallet-agnostic-boundary` (Privy primero en v1).
 
 ## Non-goals (provisional)
 
-- No se implementa la wallet por usuario: la creación de wallets va vía WDK
-  (la modular) en el sprint siguiente; Privy queda solo para auth. Sigue
-  siendo la wallet del agente en este sprint.
+- No se implementa la wallet por usuario (Privy embedded wallet / ZeroDev):
+  sigue siendo la wallet del agente; wallet-per-user es sprint siguiente.
 - No se tocan bills/agenda/transfers (endpoints que el front llama pero este
   backend no sirve — sprint separado).
 - No se migra Supabase Auth (`auth.users`/`auth.uid()`): el RLS queda
