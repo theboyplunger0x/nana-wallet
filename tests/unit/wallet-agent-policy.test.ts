@@ -170,13 +170,91 @@ describe('live WDK transfer policy', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it('keeps fixture mode usable without policy variables', async () => {
-    process.env.WDK_TOOLS_SOURCE = 'fixture';
-    delete process.env.WDK_MAX_TRANSFER_AMOUNT;
-    delete process.env.WDK_ALLOWED_RECIPIENTS;
-    const { execute, sendToken } = createGuardedSendToken();
+      it('keeps fixture mode usable without policy variables', async () => {
+        process.env.WDK_TOOLS_SOURCE = 'fixture';
+        delete process.env.WDK_MAX_TRANSFER_AMOUNT;
+        delete process.env.WDK_ALLOWED_RECIPIENTS;
+        const { execute, sendToken } = createGuardedSendToken();
 
-    await expect(sendToken.execute!(input(), toolOptions)).resolves.toMatchObject({ preview: true });
-    expect(execute).toHaveBeenCalledOnce();
-  });
-});
+        await expect(sendToken.execute!(input(), toolOptions)).resolves.toMatchObject({ preview: true });
+        expect(execute).toHaveBeenCalledOnce();
+      });
+    });
+
+    describe('circle-arc transfer policy parity', () => {
+      const previousSource = process.env.WDK_TOOLS_SOURCE;
+      const previousMaxAmount = process.env.WDK_MAX_TRANSFER_AMOUNT;
+      const previousAllowedRecipients = process.env.WDK_ALLOWED_RECIPIENTS;
+
+      beforeEach(() => {
+        resetSessionStore();
+        process.env.WDK_TOOLS_SOURCE = 'circle-arc';
+        process.env.WDK_MAX_TRANSFER_AMOUNT = '0.05';
+        process.env.WDK_ALLOWED_RECIPIENTS = `0x${ALLOWED_ADDRESS.slice(2).toLocaleUpperCase('en-US')}`;
+      });
+
+      afterEach(() => {
+        if (previousSource === undefined) delete process.env.WDK_TOOLS_SOURCE;
+        else process.env.WDK_TOOLS_SOURCE = previousSource;
+        if (previousMaxAmount === undefined) delete process.env.WDK_MAX_TRANSFER_AMOUNT;
+        else process.env.WDK_MAX_TRANSFER_AMOUNT = previousMaxAmount;
+        if (previousAllowedRecipients === undefined) delete process.env.WDK_ALLOWED_RECIPIENTS;
+        else process.env.WDK_ALLOWED_RECIPIENTS = previousAllowedRecipients;
+      });
+
+      it.each(['WDK_MAX_TRANSFER_AMOUNT', 'WDK_ALLOWED_RECIPIENTS'] as const)(
+        'fails closed when %s is missing under circle-arc',
+        async (variable) => {
+          delete process.env[variable];
+          const { execute, sendToken } = createGuardedSendToken();
+
+          await expect(sendToken.execute!(input(), toolOptions)).resolves.toMatchObject({
+            error: 'policy_rejected',
+          });
+          expect(execute).not.toHaveBeenCalled();
+        },
+      );
+
+      it('rejects an over-limit amount under circle-arc', async () => {
+        const { execute, sendToken } = createGuardedSendToken();
+
+        await expect(sendToken.execute!(input({ amount: '0.06' }), toolOptions)).resolves.toMatchObject({
+          error: 'policy_rejected',
+        });
+        expect(execute).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        { label: 'non-allowlisted', recipient: OTHER_ADDRESS },
+        { label: 'zero', recipient: ZERO_ADDRESS },
+        { label: 'burn', recipient: DEAD_ADDRESS },
+        { label: 'malformed', recipient: 'not-an-address' },
+      ])('rejects a $label recipient under circle-arc', async ({ recipient }) => {
+        const { execute, sendToken } = createGuardedSendToken();
+
+        await expect(sendToken.execute!(input({ to: recipient }), toolOptions)).resolves.toMatchObject({
+          error: 'policy_rejected',
+        });
+        expect(execute).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        { label: 'wallet', override: { wallet: 'other-wallet' } },
+        { label: 'network', override: { network: 'arc-testnet' } },
+        { label: 'token', override: { token: 'USDC' } },
+      ])('rejects a mismatched $label under circle-arc', async ({ override }) => {
+        const { execute, sendToken } = createGuardedSendToken();
+
+        await expect(sendToken.execute!(input(override), toolOptions)).resolves.toMatchObject({
+          error: 'policy_rejected',
+        });
+        expect(execute).not.toHaveBeenCalled();
+      });
+
+      it('allows a matching transfer under circle-arc', async () => {
+        const { execute, sendToken } = createGuardedSendToken();
+
+        await expect(sendToken.execute!(input(), toolOptions)).resolves.toMatchObject({ preview: true });
+        expect(execute).toHaveBeenCalledOnce();
+      });
+    });

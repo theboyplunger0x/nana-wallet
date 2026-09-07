@@ -89,6 +89,15 @@ export function readCircleArcProviderConfig(
   return { apiKey, entitySecret, senderWalletId };
 }
 
+function parseHexChainId(value: unknown): bigint | null {
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/u.test(value)) return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
 function plainUnits(units: string, decimals: number): string {
   const value = BigInt(units).toString().padStart(decimals + 1, '0');
   const fraction = value.slice(-decimals).replace(/0+$/u, '');
@@ -261,19 +270,37 @@ export class CircleArcProvider implements WalletProvider {
     if (!EVM_TRANSACTION_HASH.test(hash)) {
       throw new Error('Arc finality requires a valid transaction hash.');
     }
+    // Fail closed before any polling: a receipt read from a different chain can
+    // never confirm this transfer. Chain-id failures must not be swallowed into
+    // keep-polling.
+    const chainId = parseHexChainId(await this.rpc('eth_chainId'));
+    if (chainId !== ARC_TESTNET_CHAIN_ID) {
+      throw new Error(
+        `Arc finality verification only supports the ${ARC_TESTNET_NETWORK} chain (chain id ${ARC_TESTNET_CHAIN_ID}).`,
+      );
+    }
     const deadline = this.now() + FINALITY_TIMEOUT_MS;
     while (this.now() < deadline) {
       if (signal?.aborted) throw new Error('Arc finality wait was aborted.');
-      const [onchain, receipt] = (await Promise.all([
-        this.rpc('eth_getTransactionByHash', [hash]),
-        this.rpc('eth_getTransactionReceipt', [hash]),
-      ])) as Array<Record<string, unknown> | null>;
-      const status = receipt?.status;
-      if (status === '0x1') {
-        return { status: 'confirmed', transactionHash: hash, network: ARC_TESTNET_NETWORK };
+      let receipt: Record<string, unknown> | null = null;
+      try {
+        receipt = (await this.rpc('eth_getTransactionReceipt', [hash])) as Record<string, unknown> | null;
+      } catch {
+        // A transient RPC failure must keep polling until the deadline; an
+        // unreadable receipt must never be interpreted as confirmation.
       }
-      if (status === '0x0') {
-        return { status: 'reverted', transactionHash: hash, network: ARC_TESTNET_NETWORK };
+      if (receipt) {
+        const echoed = typeof receipt.transactionHash === 'string'
+          && receipt.transactionHash.toLocaleLowerCase('en-US') === hash.toLocaleLowerCase('en-US');
+        if (!echoed) {
+          throw new Error('Arc RPC returned a receipt for a different transaction.');
+        }
+        if (receipt.status === '0x1') {
+          return { status: 'confirmed', transactionHash: hash, network: ARC_TESTNET_NETWORK };
+        }
+        if (receipt.status === '0x0') {
+          return { status: 'reverted', transactionHash: hash, network: ARC_TESTNET_NETWORK };
+        }
       }
       await this.sleep(FINALITY_POLL_INTERVAL_MS);
     }
