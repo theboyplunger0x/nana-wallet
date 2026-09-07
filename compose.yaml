@@ -58,7 +58,7 @@ services:
       # live WDK explicitly; the compose default stays fixture (repo rule).
       WDK_TOOLS_SOURCE: "${WDK_TOOLS_SOURCE:-fixture}"
       WDK_NETWORK: "sepolia"
-      WDK_TOKEN: "USDT"
+      WDK_TOKEN: "${WDK_TOKEN:-USDT}"
       WDK_WALLET_NAME: "${WDK_WALLET_NAME:-agent-dev}"
       WDK_MAX_TRANSFER_AMOUNT: "${WDK_MAX_TRANSFER_AMOUNT:-}"
       WDK_ALLOWED_RECIPIENTS: "${WDK_ALLOWED_RECIPIENTS:-}"
@@ -115,7 +115,7 @@ services:
       # Same interpolable wallet source as the backend (compose default fixture).
       WDK_TOOLS_SOURCE: "${WDK_TOOLS_SOURCE:-fixture}"
       WDK_NETWORK: "sepolia"
-      WDK_TOKEN: "USDT"
+      WDK_TOKEN: "${WDK_TOKEN:-USDT}"
       WDK_WALLET_NAME: "${WDK_WALLET_NAME:-agent-dev}"
       WDK_MAX_TRANSFER_AMOUNT: "${WDK_MAX_TRANSFER_AMOUNT:-}"
       WDK_ALLOWED_RECIPIENTS: "${WDK_ALLOWED_RECIPIENTS:-}"

@@ -234,3 +234,32 @@ docker compose down -v
 - La imagen no lleva `NODE_ENV=production` de fábrica: el gate de producción se
   activa solo cuando un deploy provee `NODE_ENV=production` + `DATABASE_URL` +
   `DEMO_USER_ID` + `LIVE_VOICE_BINDING_PRIVATE_KEY`.
+
+## Voz live con la wallet real (todo en Docker)
+
+El daemon WDK corre como servicio compose (`wdk-daemon`, perfil `daemon`) y
+mantiene el unlock en memoria: sobrevive a recreaciones de backend/worker.
+
+```bash
+# 1) Levantar el daemon + stack (el store de wallets vive en el volume wdk_config;
+#    se puebla una vez desde el host con docker cp de ~/.config/wdk-cli).
+docker compose --profile daemon --profile dev --profile worker up -d
+
+# 2) El humano desbloquea (passphrase, terminal interactiva):
+docker compose --profile daemon exec wdk-daemon ./node_modules/.bin/wdk wallet unlock --name agent-dev --ttl 30
+
+# 3) Verificar modo live y balance real:
+curl -s http://localhost:3001/health   # {"mode":"live","wallet":"unlocked",...}
+```
+
+Notas:
+- El token demo se registra en el daemon como **`usdt-test`** (contrato custom de
+  Sepolia `0xc4DCC3…5927`); `WDK_TOKEN=usdt-test` en `.env` — el símbolo `USDT`
+  suelto no resuelve.
+- El socket del daemon comparte el volume `wdk_config` (mismo docker VM); el
+  daemon fuerza umask 077, y el entrypoint re-aplica chmod 666 al socket para
+  que backend/worker (usuario `node`) puedan conectar.
+- En macOS/Colima los mounts de unix sockets del host son `ENOTSUP`: por eso el
+  daemon corre dentro de la VM de docker, nunca en el host con mount.
+- Gates de broadcast (`WDK_LIVE`, `WDK_ALLOW_BROADCAST`, `WDK_BROADCAST_APPROVED`)
+  son decisión explícita del humano en `.env`.
