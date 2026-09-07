@@ -43,7 +43,9 @@ const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
 const SERVER_URL = "ws://localhost:7880";
 
 function tokenWithIdentity(identity: string) {
-  const payload = btoa(JSON.stringify({ identity }))
+  // Real tokens issued by livekit-server-sdk carry the identity in the
+  // standard JWT `sub` claim.
+  const payload = btoa(JSON.stringify({ sub: identity }))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
@@ -236,5 +238,25 @@ describe("livekit web client token source", () => {
     );
 
     expect(fakeRoom.connect).not.toHaveBeenCalled();
+  });
+
+  it("accepts a legacy identity claim as a fallback to sub", async () => {
+    setEnv("VITE_LIVEKIT_TOKEN_SOURCE", undefined);
+    const payload = btoa(JSON.stringify({ identity: PARTICIPANT_IDENTITY }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    mocks.fetchVoiceRoomToken.mockResolvedValue({
+      serverUrl: SERVER_URL,
+      participantToken: `header.${payload}.signature`,
+      roomName: `nani-${CONVERSATION_ID}`,
+    });
+    const fakeRoom = createFakeRoom();
+
+    const client = createLiveKitWebClient({ room: fakeRoom });
+    await expect(client.connect()).resolves.toEqual({
+      conversationId: CONVERSATION_ID,
+      revision: 3,
+    });
   });
 });

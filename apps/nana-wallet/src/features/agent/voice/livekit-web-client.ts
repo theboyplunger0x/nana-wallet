@@ -59,7 +59,10 @@ function decodeJwtIdentity(participantToken: string): string | undefined {
   if (!payload) return undefined;
   try {
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const decoded = JSON.parse(atob(base64)) as { identity?: unknown };
+    // livekit-server-sdk serializes the AccessToken identity as the standard
+    // JWT `sub` claim (verified against real tokens issued by the API).
+    const decoded = JSON.parse(atob(base64)) as { sub?: unknown; identity?: unknown };
+    if (typeof decoded.sub === "string" && decoded.sub.length > 0) return decoded.sub;
     return typeof decoded.identity === "string" ? decoded.identity : undefined;
   } catch {
     return undefined;
