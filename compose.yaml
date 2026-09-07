@@ -131,6 +131,9 @@ services:
 
   wdk-daemon:
     profiles: ["daemon"]
+    # The daemon exits cleanly when every unlocked session's TTL expires;
+    # restart so it is always up for the next unlock.
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
