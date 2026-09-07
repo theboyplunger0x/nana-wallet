@@ -59,4 +59,5 @@ WU1 → WU2 → WU3 (back en verde) ∥ WU4 (front) → WU5 → WU6.
 - Independiente del refactor `wallet-agnostic-boundary` (envs `WALLET_*`):
   ninguno toca los mismos archivos críticos; mergeable en cualquier orden.
 - No tocar el flujo preview→confirm ni la wallet singleton (sprint siguiente:
-  wallet por usuario con Privy embedded wallets / ZeroDev).
+  wallet por usuario con WDK modular vía el adapter del boundary; Privy es
+  solo auth).

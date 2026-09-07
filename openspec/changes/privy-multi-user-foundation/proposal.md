@@ -20,7 +20,9 @@ Turn the Nana system into a real multi-user application: users log in with Privy
 
 ### Out of Scope / Non-goals
 
-- Per-user wallets (Privy embedded wallets / ZeroDev): the agent's singleton wallet remains; wallet-per-user is the next sprint.
+- Per-user wallets: wallet creation must go through WDK (the modular wallet
+  kit) in a next sprint — Privy is auth-only. The agent's singleton wallet
+  remains for this sprint.
 - Bills, agenda, and transfers endpoints the front calls but this backend does not serve.
 - Supabase Auth migration (`auth.users` / `auth.uid()`): RLS stays server-mediated.
 - Migration of existing demo-user data beyond the sentinel demo row (demo data remains a dev seed).
