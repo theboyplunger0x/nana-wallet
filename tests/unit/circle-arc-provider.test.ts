@@ -27,6 +27,10 @@ type FakeState = {
   transactionHash?: string | null;
   transactionState?: string;
   receiptStatus?: string | null;
+  /** Transaction hash echoed back by the fake receipt (defaults to HASH). */
+  receiptTransactionHash?: string;
+  /** Captures every createTransaction input for idempotency assertions. */
+  createdTransactionInputs?: Array<Record<string, unknown>>;
 };
 
 function fakeClient(state: FakeState): CircleClient {
@@ -38,7 +42,8 @@ function fakeClient(state: FakeState): CircleClient {
     async estimateTransferFee() {
       return { data: { medium: { networkFee: state.estimateFee ?? '0.00001' } } };
     },
-    async createTransaction() {
+    async createTransaction(input: Record<string, unknown>) {
+      state.createdTransactionInputs?.push(input);
       if (state.createdTransactionId === undefined) {
         throw Object.assign(new Error('rejected'), { status: 400, code: 2 });
       }
@@ -54,9 +59,13 @@ function fakeRpc(state: FakeState) {
   return async (method: string) => {
     if (method === 'eth_chainId') return state.chainId ?? `0x${ARC_TESTNET_CHAIN_ID.toString(16)}`;
     if (method === 'eth_getBalance') return `0x${(1_500_000n).toString(16)}`;
-    if (method === 'eth_getTransactionReceipt') {
-      return state.receiptStatus === null ? null : { status: state.receiptStatus ?? '0x1' };
-    }
+        if (method === 'eth_getTransactionReceipt') {
+          if (state.receiptStatus === null) return null;
+          return {
+            status: state.receiptStatus ?? '0x1',
+            transactionHash: state.receiptTransactionHash ?? HASH,
+          };
+        }
     if (method === 'eth_getTransactionByHash') return { hash: HASH };
     throw new Error(`unexpected rpc method ${method}`);
   };
@@ -200,7 +209,7 @@ describe('CircleArcProvider transfers', () => {
     expect((result as { reason: string }).reason).toContain('Do not re-broadcast');
   });
 
-  it('confirms finality on a successful Arc receipt', async () => {
+  it('confirms finality on a successful Arc receipt that echoes the requested hash', async () => {
     const finality = await provider({ receiptStatus: '0x1' }).waitForFinality({
       network: ARC_TESTNET_NETWORK,
       transactionHash: HASH,
@@ -226,5 +235,124 @@ describe('CircleArcProvider transfers', () => {
       transactionHash: HASH,
       explorerUrl: 'https://testnet.arcscan.app/tx/0x',
     })).rejects.toThrow('finality deadline');
+  });
+
+  it('keeps polling through transient RPC failures instead of confirming', async () => {
+    const clock = fakeClock();
+    const rpc = async (method: string) => {
+      if (method === 'eth_chainId') return `0x${ARC_TESTNET_CHAIN_ID.toString(16)}`;
+      throw new Error('Arc RPC unavailable.');
+    };
+    const p = new CircleArcProvider(CONFIG, { client: fakeClient({}), rpc, ...clock });
+    await expect(p.waitForFinality({
+      network: ARC_TESTNET_NETWORK,
+      transactionHash: HASH,
+      explorerUrl: 'https://testnet.arcscan.app/tx/0x',
+    })).rejects.toThrow('finality deadline');
+  });
+
+  it('fails closed when the RPC serves a different chain', async () => {
+    await expect(provider({ chainId: '0x1' }).waitForFinality({
+      network: ARC_TESTNET_NETWORK,
+      transactionHash: HASH,
+      explorerUrl: 'https://testnet.arcscan.app/tx/0x',
+    })).rejects.toThrow(/only supports the arc-testnet chain/);
+  });
+
+  it('fails closed on an unparseable chain id', async () => {
+    await expect(provider({ chainId: 'not-hex' }).waitForFinality({
+      network: ARC_TESTNET_NETWORK,
+      transactionHash: HASH,
+      explorerUrl: 'https://testnet.arcscan.app/tx/0x',
+    })).rejects.toThrow('arc-testnet');
+  });
+
+  it('rejects a receipt for a different transaction instead of confirming', async () => {
+    await expect(provider({ receiptTransactionHash: `0x${'cd'.repeat(32)}` }).waitForFinality({
+      network: ARC_TESTNET_NETWORK,
+      transactionHash: HASH,
+      explorerUrl: 'https://testnet.arcscan.app/tx/0x',
+    })).rejects.toThrow('different transaction');
+  });
+
+  it('matches the receipt hash case-insensitively', async () => {
+    const finality = await provider({
+      receiptStatus: '0x1',
+      receiptTransactionHash: HASH.toLocaleUpperCase('en-US'),
+    }).waitForFinality({
+      network: ARC_TESTNET_NETWORK,
+      transactionHash: HASH,
+      explorerUrl: 'https://testnet.arcscan.app/tx/0x',
+    });
+    expect(finality.status).toBe('confirmed');
+  });
+});
+
+describe('CircleArcProvider idempotency', () => {
+  const request = {
+    network: ARC_TESTNET_NETWORK,
+    token: 'USDC',
+    to: RECIPIENT,
+    amount: '0.000001',
+    wallet: 'agent-demo',
+  };
+
+  function capturingProvider(): {
+    wallet: CircleArcProvider;
+    inputs: Array<Record<string, unknown>>;
+  } {
+    const state: FakeState = { createdTransactionId: 'tx-1', transactionHash: HASH };
+    const inputs = state.createdTransactionInputs ??= [];
+    const wallet = new CircleArcProvider(CONFIG, {
+      client: fakeClient(state),
+      rpc: fakeRpc(state),
+      ...instantClock,
+    });
+    return { wallet, inputs };
+  }
+
+  it('reuses a confirmed preview previewId as the Circle idempotency key and refId', async () => {
+    const { wallet, inputs } = capturingProvider();
+    const result = await wallet.broadcastTransfer({ ...request, previewId: 'ddd77777-7777-4777-8777-777777777777' });
+    expect(result.kind).toBe('submitted');
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toMatchObject({
+      idempotencyKey: 'ddd77777-7777-4777-8777-777777777777',
+      refId: 'ddd77777-7777-4777-8777-777777777777',
+    });
+  });
+
+  it('falls back to a generated key only for a direct call without a preview', async () => {
+    const { wallet, inputs } = capturingProvider();
+    await wallet.broadcastTransfer(request);
+    expect(inputs).toHaveLength(1);
+    const key = inputs[0].idempotencyKey;
+    expect(typeof key).toBe('string');
+    expect(key).not.toBe('');
+    expect(key).not.toBe('ddd77777-7777-4777-8777-777777777777');
+  });
+});
+
+describe('CircleArcProvider testnet-only boundary', () => {
+  const request = {
+    network: 'sepolia',
+    token: 'USDC',
+    to: RECIPIENT,
+    amount: '0.000001',
+    wallet: 'agent-demo',
+  };
+
+  it('refuses a broadcast outside arc-testnet', async () => {
+    await expect(provider({}).broadcastTransfer(request)).rejects.toThrow('arc-testnet');
+  });
+
+  it('chain-verifies finality even when the caller labels the hash for another network', async () => {
+    // The finality path is chain-verified via eth_chainId regardless of the
+    // label the caller attached to the transaction.
+    await expect(provider({ chainId: '0x1' }).waitForFinality({
+      network: 'sepolia',
+      transactionHash: HASH,
+      explorerUrl: 'https://sepolia.etherscan.io/tx/0x',
+    })).rejects.toThrow('arc-testnet');
   });
 });

@@ -826,6 +826,9 @@ function toTransferRequest(transfer: PendingTransfer): TransferRequest {
     to: transfer.to,
     amount: transfer.amount,
     wallet: transfer.wallet,
+    // CAR-006: the typed confirm flow must carry the persisted previewId so
+    // the provider derives its Circle idempotency key from it.
+    ...(transfer.previewId ? { previewId: transfer.previewId } : {}),
   };
 }
 
