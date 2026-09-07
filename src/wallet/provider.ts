@@ -19,13 +19,22 @@ export type BroadcastOutcome =
 export type FinalityOutcome = {
   status: 'confirmed' | 'reverted' | 'receipt_invalid';
   transactionHash: string;
-  network: 'sepolia';
+  network: string;
   reason?: string;
 };
 export type FinalityRequest =
   | TransactionResult
   | { transaction: TransactionResult; signal?: AbortSignal };
 export type TransferRequest = Omit<PendingTransfer, 'preview'>;
+
+const EXPLORER_URLS: Record<string, string> = {
+  sepolia: 'https://sepolia.etherscan.io/tx/',
+  'arc-testnet': 'https://testnet.arcscan.app/tx/',
+};
+
+export function explorerUrlFor(network: string, transactionHash: string): string {
+  return `${EXPLORER_URLS[network] ?? 'https://sepolia.etherscan.io/tx/'}${transactionHash}`;
+}
 
 export interface WalletProvider {
   readonly id: string;
