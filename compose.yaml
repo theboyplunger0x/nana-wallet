@@ -135,10 +135,11 @@ services:
       context: .
       dockerfile: Dockerfile
     # Root on purpose: the daemon is the only process that reads the encrypted
-    # wallet store; backend/worker only connect to its socket (world-connectable
-    # via umask), so they keep running as the unprivileged node user.
+    # wallet store; backend/worker only connect to its socket. The daemon
+    # forces umask 077 around listen(), so a guard makes the socket/pid reachable
+    # by the unprivileged node user (store files stay root-only).
     user: "0:0"
-    entrypoint: ["sh", "-c", "umask 000 && exec node node_modules/@tetherto/wdk-cli/bin/wdk-daemon.mjs"]
+    entrypoint: ["sh", "-c", "node node_modules/@tetherto/wdk-cli/bin/wdk-daemon.mjs & daemon=$$!; (while :; do [ -S /wdk-config/wdk-cli/daemon.sock ] && chmod 666 /wdk-config/wdk-cli/daemon.sock; [ -f /wdk-config/wdk-cli/daemon.pid ] && chmod 644 /wdk-config/wdk-cli/daemon.pid; sleep 0.5; done) & guard=$$!; wait $$daemon"]
     environment:
       XDG_CONFIG_HOME: "/wdk-config"
     volumes:
