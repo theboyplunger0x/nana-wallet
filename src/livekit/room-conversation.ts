@@ -122,6 +122,12 @@ export class RoomConversation {
         revision: snapshot.revision,
       };
     } catch (error) {
+      if (!(error instanceof Error && error.message === "expired_binding")) {
+        console.error(
+          "[live-voice] binding verification failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
       return {
         ok: false,
         code:
@@ -275,14 +281,21 @@ export function createRoomConversationGate(input: {
       if (!result.ok) return result;
       const binding = input.conversation.boundIdentity;
       if (!binding) return { ok: false, code: "invalid_binding" };
-      try {
-        await input.startSession(binding);
-        ready = true;
-        return result;
-      } catch {
-        await input.conversation.release();
-        return { ok: false, code: "invalid_binding" };
-      }
+          try {
+            await input.startSession(binding);
+            ready = true;
+            return result;
+          } catch (error) {
+            // The generic invalid_binding code would otherwise swallow the real
+            // cause (e.g. realtime provider failures) — surface it at minimum
+            // to the worker log without payload contents.
+            console.error(
+              "[live-voice] startSession failed during bind:",
+              error instanceof Error ? error.message : error,
+            );
+            await input.conversation.release();
+            return { ok: false, code: "invalid_binding" };
+          }
     },
     async *handleFinalTranscript(text) {
       if (!ready) {
