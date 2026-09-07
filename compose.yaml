@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${DB_HOST_PORT:-5432}:5432"
     volumes:
       - recipient_memory_postgres:/var/lib/postgresql/data
       - ./docker/init/001-recipient-app.sql:/docker-entrypoint-initdb.d/001-recipient-app.sql:ro
@@ -71,7 +71,7 @@ services:
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-}"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
