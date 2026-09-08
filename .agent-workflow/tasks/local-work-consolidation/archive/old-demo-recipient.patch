@@ -1,0 +1,13 @@
+diff --git a/examples/recipient-memory.seed.json b/examples/recipient-memory.seed.json
+index 8409e5e..f8c920a 100644
+--- a/examples/recipient-memory.seed.json
++++ b/examples/recipient-memory.seed.json
+@@ -3,7 +3,7 @@
+     {
+       "name": "Lucas",
+       "description": "mi nieto",
+-      "address": "0x1234567890123456789012345678901234567890"
++      "address": "0x45b8eaeb93139bb31874f830dc66005fd0017eb8"
+     }
+   ],
+   "facts": [

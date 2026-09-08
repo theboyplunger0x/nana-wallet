@@ -1,0 +1,86 @@
+[
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon",
+    "head": "4fc09930e5f20f3628003cc4b51655c296d6f7af",
+    "branch": "refs/heads/main",
+    "status": " M tests/unit/wallet-agent-definition.test.ts\n?? .agent-workflow/tasks/local-livekit-selfhost/\n?? openspec/changes/local-livekit-selfhost/\n"
+  },
+  {
+    "path": "/Users/ramiro/.humanlayer/workspaces/review-architecture-review-and-livekit-integration-strategy/aleph-hackathon",
+    "head": "b38719b43eb051387fa4e311d213e1d803681681",
+    "branch": "refs/heads/review-architecture-review-and-livekit-integration-strategy",
+    "status": " M src/config/privacy.ts\n M tests/unit/process-config.test.ts\n"
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon-worktrees/observability-research",
+    "head": "c5bc83e875be102febe4ab5ee37ffa8bfc762cf6",
+    "branch": "refs/heads/docs/observability-research",
+    "status": " M src/api/voice.ts\n M src/observability/voice-trace.ts\n?? .agent-workflow/\n?? src/observability/telemetry-boundary.ts\n?? tests/unit/telemetry-boundary.test.ts\n"
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon-worktrees/real-time-voice-agent-with-live-streaming",
+    "head": "85cc96f2879e39c788b7273cb5694c279cf36d4b",
+    "branch": "refs/heads/real-time-voice-agent-with-live-streaming",
+    "status": ""
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon-worktrees/realtime-tools-evals",
+    "head": "2311ad7c2b6acfafd52808caf72ea287363a33de",
+    "branch": "refs/heads/feat/realtime-tools-evals",
+    "status": ""
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.arc-migration",
+    "head": "6b44c0421a22314c0db3b3db88beaed282da73a9",
+    "branch": "refs/heads/arc-migration",
+    "status": ""
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.deploy-test-env",
+    "head": "4f03bc0f0ec983acc6af6f016c140377b07bd82b",
+    "branch": "refs/heads/deploy-test-env",
+    "status": "?? .agent-workflow/tasks/local-livekit-selfhost/\n"
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.feat-circle-arc-provider",
+    "head": "1b8b09439e8fdeb1fc0aa416197271a33db91183",
+    "branch": "refs/heads/feat/circle-arc-provider",
+    "status": "?? tmp-embed-test.ts\n"
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.feat-docker-real-wallet-start",
+    "head": "48fecb6a3baddb44149699b486914a5bbc1a19d2",
+    "branch": "refs/heads/feat/docker-real-wallet-start",
+    "status": "?? .agent-workflow/tasks/docker-real-wallet-start/\n?? .agents/skills/nana-docker-real-wallet/\n?? apps/nana-wallet/.dockerignore\n?? apps/nana-wallet/docker/\n?? docs/docker-real-wallet-start.md\n?? openspec/changes/docker-real-wallet-start/\n?? scripts/docker-real-wallet.mjs\n?? scripts/docker-real-wallet.test.mjs\n"
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.feat-openai-realtime-poc",
+    "head": "89d3d4c4cdf24c38f7c6d893d76d8736453a2b4c",
+    "branch": "refs/heads/feat/openai-realtime-poc",
+    "status": " M examples/recipient-memory.seed.json\n"
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.feat-privy-multi-user-foundation",
+    "head": "b0e85ad55d9d0f75fe00adaba9e0718f2cc99aef",
+    "branch": "refs/heads/feat/privy-multi-user-foundation",
+    "status": ""
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.fix-privy-plan-before-merge",
+    "head": "424d66eaae165c4e8c36cea8f5123ea77a39718f",
+    "branch": "refs/heads/fix/privy-plan-before-merge",
+    "status": ""
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.local-livekit-selfhost",
+    "head": "f233ffc455e507957775b422255ed683a6d81cce",
+    "branch": "refs/heads/local-livekit-selfhost",
+    "status": ""
+  },
+  {
+    "path": "/Users/ramiro/Desktop/projects/personales/aleph-hackathon.observability-slice1-port",
+    "head": "c5bc83e875be102febe4ab5ee37ffa8bfc762cf6",
+    "branch": "refs/heads/observability-slice1-port",
+    "status": " M src/api/voice.ts\n M src/observability/voice-trace.ts\n?? .agent-workflow/\n?? src/observability/telemetry-boundary.ts\n?? tests/unit/telemetry-boundary.test.ts\n"
+  }
+]

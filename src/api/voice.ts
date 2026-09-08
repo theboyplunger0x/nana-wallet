@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { scrubProviderErrorBody } from '../observability/telemetry-boundary.js';
 import {
   agentTranscribeRequestSchema,
   voiceSpeakRequestSchema,
@@ -44,7 +45,7 @@ async function transcribeWithWhisper(audio: Buffer, mimeType: string): Promise<s
   }
 
   if (!upstream.ok) {
-    console.error('nan.builders transcription failed', upstream.status, await upstream.text());
+    console.error('nan.builders transcription failed', upstream.status, scrubProviderErrorBody(await upstream.text()));
     throw { code: 'SERVICIO_CAIDO', message: 'Transcription failed.' };
   }
 

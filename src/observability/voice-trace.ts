@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readVoiceTraceConfig, type VoiceTraceConfig } from '../config/privacy.js';
 import { redactText, redactValue } from './redaction.js';
+import { detectForbiddenContent } from './telemetry-boundary.js';
 import type { VoiceRuntime } from './voice-metrics.js';
 
 export type VoiceTurnTrace = {
@@ -68,6 +69,7 @@ export class VoiceTraceRecorder {
     if (!this.config.enabled) return;
     this.purge();
     const redacted = redactVoiceTrace(trace);
+    if (detectForbiddenContent(redacted).length > 0) return;
     const expiresAt = this.now() + this.config.retentionDays * 24 * 60 * 60 * 1000;
     this.traces.set(redacted.traceId, { ...redacted, expiresAt });
     await this.sink?.(redacted);

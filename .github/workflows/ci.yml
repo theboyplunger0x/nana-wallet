@@ -54,6 +54,9 @@ jobs:
           DATABASE_URL: postgres://postgres@localhost:5432/wdk_agent
           DEMO_USER_ID: 00000000-0000-4000-8000-000000000001
 
+      - name: Docker startup script tests
+        run: node --test scripts/docker-real-wallet.test.mjs
+
       - name: Evals
         run: npm run eval
         env:
