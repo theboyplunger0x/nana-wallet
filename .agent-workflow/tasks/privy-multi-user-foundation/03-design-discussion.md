@@ -30,7 +30,7 @@ users (id UUID PK default gen_random_uuid(),
   modo demo (ver D2).
 - Relación con `recipients`/conversations: se agrega FK opcional
   `user_id → users.id` (data existing del demo user: se inserta la fila demo
-  en `users` con `privy_did = 'demo'` sentinel en migración).
+  en `users` con `privy_did = 'demo'` e `id = DEMO_USER_ID`, creada al arrancar en modo demo o antes del seed; la migración no genera otro UUID).
 
 ## D2 — Modo de identidad: `IDENTITY_PROVIDER=demo|privy`
 
@@ -136,3 +136,7 @@ Front (Privy) → Bearer <access token>
 
 Wallet por usuario (Privy embedded / ZeroDev), bills/agenda/transfers,
 Supabase Auth, migración de datos del demo.
+
+## Corrección del review antes del merge
+
+El sentinel se provisiona únicamente al arrancar en modo demo o antes del seed, con el UUID configurado. Esto evita que una fila insertada por la migración con UUID aleatorio bloquee todos los arranques posteriores. Proposal, spec, design y tasks reflejan la misma decisión.

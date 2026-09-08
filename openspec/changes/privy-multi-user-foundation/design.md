@@ -15,7 +15,7 @@ Every incoming request carries `Authorization: Bearer <privy access token>`; `Pr
 | First-login provisioning (R4/D3, approved) | `SECURITY DEFINER` function `users_ensure_for_privy_did(did, display_name)` owned by the migration owner, called by `PrivyIdentityProvider` on the owner pool connection (the pool's default role), not through `withUserTransaction`. No new `BYPASSRLS` role. | Writing `users` through `recipient_app` needs a pre-existing `app.user_id` (chicken-and-egg at first login); a `BYPASSRLS` role widens the trust surface. |
 | Contacts storage (D4, approved) | `/v1/contacts` CRUD operates on `recipients` — single source for agent and user contacts. `provenance` distinguishes origin (`{"origin":"user"}` vs agent); versioning prevents silent overwrites. No new `contacts` table. | A parallel `contacts` table would dual-write and drift from agent memory. |
 | Recipient status vocabulary | **Contract-level mapping only, no schema change.** Physical `recipients.status` stays `('active','inactive')`; the API contract exposes logical `status: 'confirmed' | 'archived'`. Create maps `confirmed` → insert `status='active'` + `provenance {"origin":"user"}` + `address_confirmed_at=now()`; soft delete maps `archived` → set `status='inactive'`. | Extending the CHECK to `'confirmed'/'archived'` would break every agent query that hardcodes `status='active'` (`src/memory/repository.ts:67,81,100`) and silently hide user contacts from the agent, violating D4. New status columns add a second source of truth. |
-| Demo sentinel (PMU-004) | The migration seeds `users (privy_did='demo', display_name='Nana (demo)')`; application startup in demo mode additionally ensures a sentinel row with `id = DEMO_USER_ID` (idempotent upsert on `privy_did`), so existing demo-seeded data keeps its UUID and the demo provider resolves to a stable row. | A fixed hard-coded sentinel UUID would orphan every existing dev database seeded with a random `DEMO_USER_ID`. |
+| Demo sentinel (PMU-004) | The migration creates no demo row. Demo-mode startup and the demo seed call `ensureDemoSentinelUser` with `id = DEMO_USER_ID` before serving traffic or writing recipients. Repeated calls preserve that UUID; an existing demo row with a different UUID rejects startup without changing data. | A fixed hard-coded sentinel UUID would orphan every existing dev database seeded with a random `DEMO_USER_ID`. |
 | Front token plumbing (D6, approved) | `PrivyProvider` + async `getAccessToken()` before every request; on `401`, refresh and retry once. `sessionStorage nana-wallet-token` and the `"token-de-desarrollo"` fallback retire except when `VITE_IDENTITY_PROVIDER=demo`. | Cookies/httpOnly sessions are an approved non-goal until SSR appears. |
 | Capacitor WebView + Privy popups | **Deferred.** Web build validates Privy popups in-sprint; the Capacitor iOS/Android WebView popup behavior is an explicit follow-up change, `capacitor-privy-webview-login` (validated, not silently assumed, next sprint). | Validating Capacitor in-sprint would couple mobile store builds to this PR's delivery. |
 | `/v1/me` payload (PMU-007) | Identity-only: `{ userId, displayName }` under the same `ApiEnvelope` as wallet-style endpoints. `privy_did` is **not** exposed — it is an internal identity key; the front never needs it. No wallet, balance, or KYC fields. | The front's legacy `Me` type (dailyLimit, documentLast3, …) is not served by this backend and stays out of scope per D5. |
@@ -34,7 +34,7 @@ Every incoming request carries `Authorization: Bearer <privy access token>`; `Pr
 
 | Path | Action and responsibility |
 |---|---|
-| `supabase/migrations/20260901000300_users.sql` | **Create.** `users` table, RLS ENABLED+FORCED, `user_self_isolation` policy, `SECURITY DEFINER` upsert function, demo sentinel seed, `NOT VALID` FKs, grants. Sketch below. |
+| `supabase/migrations/20260901000300_users.sql` | **Create.** `users` table, RLS ENABLED+FORCED, `user_self_isolation` policy, `SECURITY DEFINER` upsert function, `NOT VALID` FKs, grants. Sketch below. |
 | `src/db/migrations/002_users.sql` | **Create.** Mirror of the Supabase migration for the local compose dev database (same pattern as `001_recipient_memory.sql`). |
 | `src/auth/identity.ts` | **Modify.** Keep `RequestIdentity`/`RequestIdentityProvider`; keep `DemoIdentityProvider`. Remove the "replace before multi-user" comment. |
 | `src/auth/privy-identity.ts` | **Create.** `PrivyIdentityProvider`: ES256 JWT verification via `jose` (already a dependency used by `live-binding.ts`), `iss='privy.io'`, `aud=PRIVY_APP_ID`, expiry enforced by `jwtVerify`; extracts `sub` (DID, validated `did:privy:` prefix); upserts via `users_ensure_for_privy_did` on the owner connection; throws `PrivyIdentityError('unauthenticated')` mapped to `401`. |
@@ -49,7 +49,7 @@ Every incoming request carries `Authorization: Bearer <privy access token>`; `Pr
 | `src/memory/runtime.ts` | **Modify.** Deprecate `getConfiguredRecipientMemoryRuntime` (fixed `demoUserId`); export a factory `getMemoryRuntimeForUser(userId): RecipientMemoryRuntime` wrapping the shared tenant-agnostic service. |
 | `src/runtime/dependencies.ts` | **Modify.** Worker dependencies stop keying the claimed-recipient revalidation to the demo tenant; they use the shared service with the conversation's resolved internal UUID (already carried by `binding.sub`). |
 | `src/conversations/service.ts` | **Modify.** Accept a per-request memory runtime provider (`(userId) => runtime`) instead of a fixed demo-tenant runtime; text path parity with voice (PMU-014). |
-| `src/memory/seed.ts` | **Modify.** Reject seeding unless `IDENTITY_PROVIDER=demo` (PMU-004 seed gating). |
+| `src/memory/seed.ts` | **Modify.** Reject seeding unless `IDENTITY_PROVIDER=demo`; then call `ensureDemoSentinelUser` with `DEMO_USER_ID` before writing recipients (PMU-004). |
 | `apps/nana-wallet/src/lib/api.ts` | **Modify.** Async `getApiToken()` → Privy `getAccessToken()`; `Authorization: Bearer` on every request; `401` → refresh + retry once, no second retry; demo fallback only when `VITE_IDENTITY_PROVIDER=demo`; retire `sessionStorage nana-wallet-token` and the unconditional `"token-de-desarrollo"` fallback. |
 | `apps/nana-wallet/src/lib/api-types.ts` | **Modify.** Mirror the new `src/contracts/http.ts` types in the same PR (PMU-018, hard repo rule). |
 | `apps/nana-wallet/src/routes/__root.tsx` + new `apps/nana-wallet/src/routes/login.tsx` | **Modify/Create.** `PrivyProvider` (`VITE_PRIVY_APP_ID`) wraps the app in `__root`; login screen with SMS/WhatsApp + email; unauthenticated guard redirects to `/login`; logout clears local auth state (`routeTree.gen.ts` regenerates). |
@@ -90,8 +90,8 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.users_ensure_for_privy_did(TEXT, TEXT) FROM PUBLIC;
 
-INSERT INTO public.users (privy_did, display_name)
-VALUES ('demo', 'Nana (demo)') ON CONFLICT (privy_did) DO NOTHING;
+-- Demo provisioning belongs to ensureDemoSentinelUser at startup/seed time.
+-- The migration cannot choose an id without the configured DEMO_USER_ID.
 
 -- NOT VALID: existing demo rows are grandfathered; demo-mode startup ensures the
 -- sentinel (id = DEMO_USER_ID) before serving, so all new writes satisfy the FK.

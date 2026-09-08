@@ -70,13 +70,32 @@ The backend MUST resolve a verified Privy DID to an internal `users` UUID, creat
 
 ### Requirement: PMU-004 Demo Sentinel User
 
-A `users` row with sentinel `privy_did='demo'` MUST be seeded so demo mode has a stable internal UUID. In `demo` mode the demo identity provider MUST resolve to this sentinel row's UUID. The recipient-memory seed MUST run only in demo mode.
+A `users` row with sentinel `privy_did='demo'` and `id = DEMO_USER_ID` MUST be provisioned by demo-mode startup before serving requests, or by the demo seed before writing recipients. The schema migration MUST NOT insert a demo row with a generated UUID. Repeated provisioning MUST preserve the configured UUID; an existing sentinel with a different UUID MUST reject provisioning without changing data. In `demo` mode the demo identity provider MUST resolve to this sentinel row's UUID. The recipient-memory seed MUST run only in demo mode.
 
 #### Scenario: demo resolution
 
 - GIVEN `IDENTITY_PROVIDER=demo`
 - WHEN a request resolves identity
 - THEN it returns the demo sentinel UUID
+
+#### Scenario: fresh migration followed by demo startup
+
+- GIVEN a freshly migrated database and a configured `DEMO_USER_ID`
+- WHEN demo-mode startup provisions the sentinel twice
+- THEN exactly one demo row exists with `id = DEMO_USER_ID`
+- AND both startups succeed without Privy access
+
+#### Scenario: conflicting sentinel
+
+- GIVEN an existing demo sentinel whose UUID differs from `DEMO_USER_ID`
+- WHEN demo-mode startup provisions the sentinel
+- THEN startup fails without rewriting either the sentinel or existing user data
+
+#### Scenario: seed before server startup
+
+- GIVEN a freshly migrated database and `IDENTITY_PROVIDER=demo`
+- WHEN the recipient-memory seed runs before the server has started
+- THEN it provisions the sentinel with `id = DEMO_USER_ID` before inserting recipients
 
 #### Scenario: seed gated to demo
 
