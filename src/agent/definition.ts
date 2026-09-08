@@ -6,6 +6,7 @@ import type { RecipientMemoryRuntime } from '../memory/runtime.js';
 import { createRecipientMemoryTools } from '../memory/tools.js';
 import { isValidEvmAddress } from '../memory/address.js';
 import type { WalletProvider, TransferRequest } from '../wallet/provider.js';
+import { explorerUrlFor } from '../wallet/provider.js';
 import { decodeMcpText } from '../wdk/mcp-client.js';
 import { transactionResultSchema, transferPreviewSchema, type TransferPreview } from '../contracts/http.js';
 
@@ -41,6 +42,14 @@ export const sendTokenInputSchema = z.object({
   dryRun: z.boolean(),
 });
 export type SendTokenInput = z.infer<typeof sendTokenInputSchema>;
+
+/**
+ * Internal broadcast input carried between the guarded tool wrapper and the
+ * canonical sendToken operation. `previewId` is model-invisible: the zod input
+ * schema must never expose it, or a hallucinated key could silently defeat the
+ * duplicate-broadcast idempotency protection.
+ */
+export type SendTokenBroadcastInput = SendTokenInput & { previewId?: string };
 
 export const balanceInputSchema = z.object({
   network: z.string().trim().min(1),
@@ -128,16 +137,26 @@ export function normalizeBroadcastResult(output: unknown, network: string) {
   const result = transactionResultSchema.safeParse({
     network,
     transactionHash: hash,
-    explorerUrl: `https://sepolia.etherscan.io/tx/${hash}`,
+    explorerUrl: explorerUrlFor(network, hash),
   });
   return result.success ? result.data : null;
+}
+
+/**
+ * Single source of truth for whether live-transfer policy applies. Both policy
+ * gates (definition and wallet-agent) must branch on this predicate so the
+ * circle-arc live mode can never bypass the policy configuration the WDK live
+ * mode enforces.
+ */
+export function isLiveTransferSource(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.WDK_TOOLS_SOURCE === 'live' || environment.WDK_TOOLS_SOURCE === 'circle-arc';
 }
 
 export function validateWalletTransferPolicy(
   input: SendTokenInput,
   config: WalletAgentConfig,
 ): { error: 'policy_rejected'; message: string } | undefined {
-  if (process.env.WDK_TOOLS_SOURCE !== 'live') return undefined;
+  if (!isLiveTransferSource()) return undefined;
   const maximum = process.env.WDK_MAX_TRANSFER_AMOUNT?.trim();
   const allowed = process.env.WDK_ALLOWED_RECIPIENTS?.split(',').map((value) => value.trim()).filter(Boolean);
   if (!maximum || !allowed?.length) return { error: 'policy_rejected', message: 'Live transfer policy is not configured: set WDK_MAX_TRANSFER_AMOUNT and WDK_ALLOWED_RECIPIENTS.' };
@@ -213,7 +232,7 @@ function createWalletOperations(context: WalletAgentContext): AgentToolDefinitio
       name: 'send_token',
       description: 'Preview or execute a wallet transfer.',
       inputSchema: sendTokenInputSchema,
-      execute: async (input) => sendToken(input as SendTokenInput, context),
+      execute: async (input) => sendToken(input as SendTokenBroadcastInput, context),
     },
   ];
 }
@@ -234,7 +253,7 @@ function createRecipientMemoryOperations(context: WalletAgentContext): AgentTool
   ];
 }
 
-async function sendToken(input: SendTokenInput, context: WalletAgentContext): Promise<unknown> {
+async function sendToken(input: SendTokenBroadcastInput, context: WalletAgentContext): Promise<unknown> {
   const normalized = { ...input, token: normalizeWalletToken(input.token, context.config.token) };
   const policyError = validateWalletTransferPolicy(normalized, context.config);
   if (policyError) return policyError;
@@ -248,6 +267,7 @@ async function sendToken(input: SendTokenInput, context: WalletAgentContext): Pr
     to: normalized.to,
     amount: normalized.amount,
     wallet: normalized.wallet,
+    ...(normalized.previewId ? { previewId: normalized.previewId } : {}),
   };
   if (normalized.dryRun) return { preview: true, ...await context.wallet.previewTransfer(request) };
   const outcome = await context.wallet.broadcastTransfer(request);

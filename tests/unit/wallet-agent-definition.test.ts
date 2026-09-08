@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createWalletAgentDefinition,
+  normalizeBroadcastResult,
   normalizeWalletToken,
   validateWalletTransferPolicy,
   type WalletAgentContext,
@@ -75,5 +76,120 @@ describe('wallet agent definition', () => {
     expect(validateWalletTransferPolicy({
       network: 'sepolia', token: 'usdt-test', to: '0x1234567890123456789012345678901234567890', amount: '1', wallet: 'agent-demo', dryRun: true,
     }, context().config)).toBeUndefined();
+  });
+});
+
+describe('validateWalletTransferPolicy circle-arc parity', () => {
+  const previousSource = process.env.WDK_TOOLS_SOURCE;
+  const previousMaximum = process.env.WDK_MAX_TRANSFER_AMOUNT;
+  const previousAllowed = process.env.WDK_ALLOWED_RECIPIENTS;
+
+  const allowedAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+  const otherAddress = '0x1234567890123456789012345678901234567890';
+
+  function gateInput(overrides: Partial<Parameters<typeof validateWalletTransferPolicy>[0]> = {}) {
+    return {
+      network: 'sepolia',
+      token: 'usdt-test',
+      to: allowedAddress,
+      amount: '0.05',
+      wallet: 'agent-demo',
+      dryRun: true,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    resetSessionStore();
+    process.env.WDK_TOOLS_SOURCE = 'circle-arc';
+    process.env.WDK_MAX_TRANSFER_AMOUNT = '0.05';
+    process.env.WDK_ALLOWED_RECIPIENTS = allowedAddress.toLocaleUpperCase('en-US');
+  });
+
+  afterEach(() => {
+    if (previousSource === undefined) delete process.env.WDK_TOOLS_SOURCE;
+    else process.env.WDK_TOOLS_SOURCE = previousSource;
+    if (previousMaximum === undefined) delete process.env.WDK_MAX_TRANSFER_AMOUNT;
+    else process.env.WDK_MAX_TRANSFER_AMOUNT = previousMaximum;
+    if (previousAllowed === undefined) delete process.env.WDK_ALLOWED_RECIPIENTS;
+    else process.env.WDK_ALLOWED_RECIPIENTS = previousAllowed;
+  });
+
+  it.each(['WDK_MAX_TRANSFER_AMOUNT', 'WDK_ALLOWED_RECIPIENTS'] as const)(
+    'fails closed when %s is missing under circle-arc',
+    (variable) => {
+      delete process.env[variable];
+      expect(validateWalletTransferPolicy(gateInput(), context().config)).toMatchObject({
+error: 'policy_rejected',
+      });
+    },
+  );
+
+  it('rejects an over-limit amount under circle-arc', () => {
+    expect(validateWalletTransferPolicy(gateInput({ amount: '0.055' }), context().config)).toMatchObject({
+      error: 'policy_rejected',
+    });
+  });
+
+  it.each([
+    { label: 'non-allowlisted', to: otherAddress },
+    { label: 'zero', to: '0x0000000000000000000000000000000000000000' },
+    { label: 'burn', to: '0x000000000000000000000000000000000000dEaD' },
+    { label: 'malformed', to: 'not-an-address' },
+  ])('rejects a $label recipient under circle-arc', ({ to }) => {
+    expect(validateWalletTransferPolicy(gateInput({ to }), context().config)).toMatchObject({
+      error: 'policy_rejected',
+    });
+  });
+
+  it.each([
+    { label: 'wallet', override: { wallet: 'other-wallet' } },
+    { label: 'network', override: { network: 'arc-testnet' } },
+    { label: 'token', override: { token: 'USDC' } },
+  ])('rejects a mismatched $label under circle-arc', ({ override }) => {
+    expect(validateWalletTransferPolicy(gateInput(override), context().config)).toMatchObject({
+      error: 'policy_rejected',
+    });
+  });
+
+  it('allows a matching transfer under circle-arc', () => {
+    expect(validateWalletTransferPolicy(gateInput(), context().config)).toBeUndefined();
+  });
+
+  it('stays inert without a live transfer source', () => {
+    process.env.WDK_TOOLS_SOURCE = 'fixture';
+    delete process.env.WDK_MAX_TRANSFER_AMOUNT;
+    delete process.env.WDK_ALLOWED_RECIPIENTS;
+    expect(validateWalletTransferPolicy(gateInput(), context().config)).toBeUndefined();
+  });
+});
+
+describe('normalizeBroadcastResult explorer URL (D6, CAR-010)', () => {
+  const HASH = `0x${'ab'.repeat(32)}`;
+
+  it('links arc-testnet broadcasts to the Arcscan explorer', () => {
+    const result = normalizeBroadcastResult(
+      { network: 'arc-testnet', transactionHash: HASH, explorerUrl: 'ignored' },
+      'arc-testnet',
+    );
+
+    expect(result).toEqual({
+      network: 'arc-testnet',
+      transactionHash: HASH,
+      explorerUrl: `https://testnet.arcscan.app/tx/${HASH}`,
+    });
+  });
+
+  it('keeps the sepolia etherscan URL unchanged', () => {
+    const result = normalizeBroadcastResult(
+      { network: 'sepolia', transactionHash: HASH, explorerUrl: 'ignored' },
+      'sepolia',
+    );
+
+    expect(result).toEqual({
+      network: 'sepolia',
+      transactionHash: HASH,
+      explorerUrl: `https://sepolia.etherscan.io/tx/${HASH}`,
+    });
   });
 });

@@ -171,6 +171,50 @@ LIVEKIT_E2E_BINDING_PUBLIC_KEY='public-key-pem' \
 npm run test:e2e:livekit-smoke
 ```
 
+## Arc Testnet wallet provider (optional)
+
+For a real-funds demo you can replace the WDK wallet path with Circle
+developer-controlled wallets on Arc Testnet by setting
+`WDK_TOOLS_SOURCE=circle-arc` in the root `.env`:
+
+```dotenv
+WDK_TOOLS_SOURCE=circle-arc
+WDK_NETWORK=arc-testnet
+WDK_TOKEN=USDC
+CIRCLE_API_KEY=TEST_API_KEY:id:secret
+CIRCLE_ENTITY_SECRET=64-hex-entity-secret
+CIRCLE_SENDER_WALLET_ID=circle-wallet-uuid
+WDK_MAX_TRANSFER_AMOUNT=0.05
+WDK_ALLOWED_RECIPIENTS=0x1111111111111111111111111111111111111111
+```
+
+Provider selection summary: `fixture` is the safe default, `live` routes
+through the bundled WDK MCP process on Sepolia/USDT, and `circle-arc` builds
+the Circle provider on Arc Testnet at boot — missing credentials or a
+mismatched `WDK_NETWORK`/`WDK_TOKEN` refuse the boot (`CircleArcConfigError`),
+and there is no silent fallback to fixture mode.
+
+Trust model and boundary: Circle holds the wallet keys server-side under the
+developer entity; the backend holds the entity secret (never logged, never
+sent to the client); the user's device never signs. Arc TESTNET only —
+chain id 5042002, USDC only, no mainnet configuration. The live transfer
+policy variables are mandatory: circle-arc transfers fail closed with
+`policy_rejected` when `WDK_MAX_TRANSFER_AMOUNT` or `WDK_ALLOWED_RECIPIENTS`
+is absent or invalid.
+
+Real-USDC consent warning: running the manual end-to-end exercise moves
+real testnet USDC through Circle and the Arc testnet RPC and requires the
+operator's explicit consent. The numbered consent-first steps live in
+`docs/local-live-runbook.md` ("Arc Testnet (Circle developer-controlled
+wallet)" → "Manual E2E").
+
+`/health` note: under circle-arc the response keeps its legacy fields
+(`mode: live`, `network: arc-testnet`, `mcp`, `wallet`) and may include the
+additive optional `provider` object (`status: healthy | degraded |
+unavailable`, plus a credential-free `reason` when unhealthy). `/health` is
+not a `/v1` route; `docs/api.md` is intentionally untouched and no `/v1`
+request/response shape changed.
+
 ## Live voice architecture
 
 Live voice is one OpenAI Realtime speech-to-speech session

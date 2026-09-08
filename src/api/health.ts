@@ -7,7 +7,8 @@ const WALLET = () => process.env.WDK_WALLET_NAME ?? 'agent-demo';
 // Read lazily: module-level constants froze the ambient .env at import time and
 // made the health contract depend on dotenv evaluation order (hermetic tests pin
 // the env before building the server).
-const MODE = () => (process.env.WDK_TOOLS_SOURCE === 'live' ? 'live' : 'fixture');
+    const MODE = () =>
+      process.env.WDK_TOOLS_SOURCE === 'live' || process.env.WDK_TOOLS_SOURCE === 'circle-arc' ? 'live' : 'fixture';
 
 export async function registerHealthRoutes(app: FastifyInstance, dependencies: { wallet: WalletProvider }): Promise<void> {
   app.get('/health', async (): Promise<HealthResponse> => {
@@ -30,6 +31,18 @@ export async function registerHealthRoutes(app: FastifyInstance, dependencies: {
       }
     }
 
-    return { status: 'ok', mode: MODE(), mcp, wallet, network: NETWORK() };
-  });
+      return { status: 'ok', mode: MODE(), mcp, wallet, network: NETWORK(), provider: await providerHealth(dependencies.wallet) };
+    });
+}
+
+// D5: the provider health result is additive and provider-agnostic. A health()
+// implementation that throws must still yield an honest 'unavailable' envelope,
+// and its reason is intentionally NOT the raw error message: SDK errors can
+// interpolate configuration values, which CAR-017 forbids on the health route.
+async function providerHealth(wallet: WalletProvider): Promise<HealthResponse['provider']> {
+  try {
+    return await wallet.health({ wallet: WALLET(), network: NETWORK() });
+  } catch {
+    return { status: 'unavailable', reason: 'The wallet provider health check failed.' };
+  }
 }

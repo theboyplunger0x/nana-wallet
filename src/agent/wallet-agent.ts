@@ -17,6 +17,7 @@ import {
   normalizeBroadcastResult,
   normalizeWalletToken as normalizeCanonicalWalletToken,
   sendTokenInputSchema,
+  isLiveTransferSource,
   type SendTokenInput,
 } from './definition.js';
 import { getWdkTools } from './wdk-tools.js';
@@ -46,7 +47,7 @@ import { isValidEvmAddress } from '../memory/address.js';
 import { getConfiguredRecipientMemoryRuntime, type RecipientMemoryRuntime } from '../memory/runtime.js';
 import { resolveTransferRecipient, type RecipientMemoryToolPort } from './recipient-resolution.js';
 import { hasExplicitTransferAddress } from './recipient-intent.js';
-import type { ConversationTurnResult, PendingTransfer } from '../contracts/http.js';
+import type { ConversationTurnResult, PendingTransfer, TransactionResult } from '../contracts/http.js';
 import type { ConversationLanguage } from '../conversations/language.js';
 
 export { canonicalizeTransferPreview } from './definition.js';
@@ -160,7 +161,7 @@ function validateLiveTransferPolicy(
   input: SendTokenInput,
   config: WalletAgentConfig,
 ): { error: 'policy_rejected'; message: string } | null {
-  if (process.env.WDK_TOOLS_SOURCE !== 'live') return null;
+  if (!isLiveTransferSource()) return null;
 
   const maxAmount = process.env.WDK_MAX_TRANSFER_AMOUNT?.trim();
   const allowedRecipients = process.env.WDK_ALLOWED_RECIPIENTS?.split(',')
@@ -221,7 +222,7 @@ function validateLiveTransferPolicy(
 
 const transactionReceiptOutcomeSchema = z.object({
   status: z.enum(['confirmed', 'reverted']),
-  network: z.literal('sepolia'),
+  network: z.string().min(1),
   transactionHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/u),
 });
 
@@ -339,7 +340,15 @@ export function buildGuardedTools(
             'Refusing to broadcast: no matching confirmed preview for this transfer in the current session.',
         };
       }
-      return baseSendToken.execute!(normalizedInput, options);
+      // Single injection point for the persisted preview idempotency key
+      // (CAR-006): only a broadcast that matches a confirmed preview carries
+      // its previewId, and only when one exists — direct previews and the
+      // legacy WDK path (whose in-memory pending transfer has no previewId)
+      // stay byte-identical.
+      const broadcastInput = normalizedInput.dryRun || !session.pendingTransfer?.previewId
+        ? normalizedInput
+        : { ...normalizedInput, previewId: session.pendingTransfer.previewId };
+      return baseSendToken.execute!(broadcastInput, options);
     },
   });
 
@@ -473,17 +482,33 @@ export async function handleMessage(
         code: claim.status === 'uncertain' ? 'broadcast_uncertain' : 'broadcast_in_progress',
       };
     }
-    try {
-      const baseTools = await getWdkTools();
-      const tools = buildGuardedTools(baseTools, session, recipientMemory);
-      return executeConfirmedTransfer(
-        session,
-        claim.transfer,
-        tools,
-        options.transactionReceiptWaiter,
-        options.abortSignal,
-      );
-    } catch (error) {
+        try {
+          const agentConfig = getWalletAgentConfig();
+          // CAR-013: under a provider-backed runtime the confirm path must build
+          // the same definition tools the preview path uses — never the WDK tool
+          // source — so the broadcast lands on the selected provider seam.
+          const baseTools = options.walletProvider
+            ? toAiSdkTools(createWalletAgentDefinition(), {
+              conversationId: session.id,
+              userId: recipientMemory?.userId ?? '',
+              language: options.language ?? 'en',
+              config: agentConfig,
+              session,
+              wallet: options.walletProvider,
+              ...(recipientMemory ? { recipientMemory } : {}),
+              ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+            })
+            : await getWdkTools();
+          const tools = buildGuardedTools(baseTools, session, recipientMemory, agentConfig);
+          return executeConfirmedTransfer(
+            session,
+            claim.transfer,
+            tools,
+            options.transactionReceiptWaiter,
+            options.abortSignal,
+            options.walletProvider,
+          );
+        } catch (error) {
       releasePendingTransferClaim(session);
       const message = mapAgentError(error);
       appendMessage(session, { role: 'assistant', content: message });
@@ -634,8 +659,9 @@ async function executeConfirmedTransfer(
   session: ConversationSession,
   pending: NonNullable<ConversationSession['pendingTransfer']>,
   tools: Record<string, Tool>,
-  transactionReceiptWaiter: TransactionReceiptWaiter = defaultTransactionReceiptWaiter,
+  transactionReceiptWaiter?: TransactionReceiptWaiter,
   abortSignal?: AbortSignal,
+  walletProvider?: WalletProvider,
 ): Promise<ConversationTurnResult> {
   if (!pending.preview || !tools.send_token?.execute) {
     releasePendingTransferClaim(session);
@@ -653,7 +679,23 @@ async function executeConfirmedTransfer(
     dryRun: false,
   };
 
-  let output: unknown;
+      // D3: the provider's waitForFinality is the single Arc verification
+      // source when a wallet provider is present; an explicitly injected waiter
+      // (test override) wins, and the legacy WDK path keeps
+      // defaultTransactionReceiptWaiter byte-identical. The outcome is parsed by
+      // transactionReceiptOutcomeSchema below, so a provider `receipt_invalid`
+      // status fails closed into markTransactionReceiptInvalid.
+      const receiptWaiter = transactionReceiptWaiter
+        ? transactionReceiptWaiter
+        : walletProvider
+          ? (transaction: TransactionResult, waiterOptions?: { signal?: AbortSignal }) =>
+            walletProvider.waitForFinality({
+              transaction,
+              ...(waiterOptions?.signal ? { signal: waiterOptions.signal } : {}),
+            })
+          : defaultTransactionReceiptWaiter;
+
+      let output: unknown;
   try {
     output = await tools.send_token.execute(input, toolCallOptions);
   } catch {
@@ -679,22 +721,24 @@ async function executeConfirmedTransfer(
   const transaction = normalizeBroadcastResult(output, pending.network);
   if (transaction) {
     setLastTransactionHash(session, transaction.transactionHash);
-    let rawReceipt: unknown;
-    try {
-      rawReceipt = await transactionReceiptWaiter(transaction, { signal: abortSignal });
-    } catch {
-      return markTransactionReceiptInvalid(
-        session,
-        transaction.transactionHash,
-        'The Sepolia receipt could not be verified.',
-      );
-    }
+        let rawReceipt: unknown;
+        try {
+          rawReceipt = await receiptWaiter(transaction, { signal: abortSignal });
+        } catch (error) {
+          return markTransactionReceiptInvalid(
+            session,
+            transaction.transactionHash,
+            `The ${pending.network} receipt could not be verified${
+              error instanceof Error ? `: ${error.message}` : '.'
+            }`,
+          );
+        }
     const parsedReceipt = transactionReceiptOutcomeSchema.safeParse(rawReceipt);
     if (!parsedReceipt.success) {
       return markTransactionReceiptInvalid(
         session,
         transaction.transactionHash,
-        'The Sepolia receipt is invalid.',
+        `The ${pending.network} receipt is invalid.`,
       );
     }
     const receipt = parsedReceipt.data;
@@ -705,12 +749,12 @@ async function executeConfirmedTransfer(
       return markTransactionReceiptInvalid(
         session,
         transaction.transactionHash,
-        'The Sepolia receipt does not match the transfer.',
+        `The ${pending.network} receipt does not match the transfer.`,
       );
     }
     clearPendingTransfer(session);
     if (receipt.status === 'reverted') {
-      const message = `The transfer reverted on Sepolia. Hash: ${transaction.transactionHash}`;
+      const message = `The transfer reverted on ${pending.network}. Hash: ${transaction.transactionHash}`;
       appendMessage(session, { role: 'assistant', content: message });
       return { status: 'error', message, code: 'transfer_reverted' };
     }

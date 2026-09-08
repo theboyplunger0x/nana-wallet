@@ -12,7 +12,7 @@ import type { ConversationRepository } from './repository.js';
 import { createNarrationPolicy, narrateFinancialFact, type NarrationPolicy } from './narration-policy.js';
 import type { ConversationSnapshot, WalletProgress } from './types.js';
 import type { RecipientMemoryRuntime } from '../memory/runtime.js';
-import type { WalletProvider, TransferRequest } from '../wallet/provider.js';
+import { explorerUrlFor, type WalletProvider, type TransferRequest } from '../wallet/provider.js';
 import { validateWalletTransferPolicy } from '../wallet/agent-tools.js';
 import { isValidEvmAddress } from '../memory/address.js';
 import type { FinancialTaskRegistry } from './financial-task-registry.js';
@@ -476,7 +476,7 @@ export function createWalletConversationService(dependencies: WalletConversation
     try {
       finality = await dependencies.wallet.waitForFinality({ transaction });
     } catch (error) {
-      finality = { status: 'receipt_invalid' as const, transactionHash: transaction.transactionHash, network: 'sepolia' as const, reason: error instanceof Error ? error.message : 'Receipt validation failed.' };
+      finality = { status: 'receipt_invalid' as const, transactionHash: transaction.transactionHash, network: transaction.network, reason: error instanceof Error ? error.message : 'Receipt validation failed.' };
     }
 
     if (finality.status === 'confirmed') {
@@ -512,7 +512,7 @@ export function createWalletConversationService(dependencies: WalletConversation
       const transaction = snapshot.transaction ?? {
         network: snapshot.pendingTransfer?.network ?? 'sepolia',
         transactionHash: snapshot.lastTransactionHash,
-        explorerUrl: `https://sepolia.etherscan.io/tx/${snapshot.lastTransactionHash}`,
+        explorerUrl: explorerUrlFor(snapshot.pendingTransfer?.network ?? 'sepolia', snapshot.lastTransactionHash),
       };
       return { status: 'sent', message: 'Transfer confirmed.', transaction };
     }
@@ -826,6 +826,9 @@ function toTransferRequest(transfer: PendingTransfer): TransferRequest {
     to: transfer.to,
     amount: transfer.amount,
     wallet: transfer.wallet,
+    // CAR-006: the typed confirm flow must carry the persisted previewId so
+    // the provider derives its Circle idempotency key from it.
+    ...(transfer.previewId ? { previewId: transfer.previewId } : {}),
   };
 }
 

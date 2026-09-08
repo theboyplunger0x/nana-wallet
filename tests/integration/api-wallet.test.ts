@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { buildServer } from '../../src/server.js';
+import { describe, expect, it, vi } from 'vitest';
 
 // Hermetic: the local development .env may set WDK_TOOLS_SOURCE=live; these
-// tests exercise the fixture provider contract.
-process.env.WDK_TOOLS_SOURCE = 'fixture';
+// tests exercise the fixture provider contract. The pins run before the server
+// import because dotenv evaluates the ambient .env during that import chain
+// and src/api/wallet.ts freezes NETWORK at module import time.
+vi.hoisted(() => {
+  process.env.WDK_TOOLS_SOURCE = 'fixture';
+  process.env.WDK_NETWORK = 'sepolia';
+  process.env.WDK_TOKEN = 'USDT';
+});
+
+import { buildServer } from '../../src/server.js';
 
 describe('wallet read endpoints', () => {
   it('GET /v1/wallet/address returns the fixture address', async () => {
