@@ -59,7 +59,7 @@ services:
       # Wallet source is interpolable so the git-ignored .env opts into
       # live WDK explicitly; the compose default stays fixture (repo rule).
       WDK_TOOLS_SOURCE: "${WDK_TOOLS_SOURCE:-fixture}"
-      WDK_NETWORK: "sepolia"
+      WDK_NETWORK: "${WDK_NETWORK:-sepolia}"
       WDK_TOKEN: "${WDK_TOKEN:-USDT}"
       WDK_WALLET_NAME: "${WDK_WALLET_NAME:-agent-dev}"
       WDK_MAX_TRANSFER_AMOUNT: "${WDK_MAX_TRANSFER_AMOUNT:-}"
@@ -117,7 +117,7 @@ services:
       DEMO_USER_ID: "00000000-0000-4000-8000-000000000001"
       # Same interpolable wallet source as the backend (compose default fixture).
       WDK_TOOLS_SOURCE: "${WDK_TOOLS_SOURCE:-fixture}"
-      WDK_NETWORK: "sepolia"
+      WDK_NETWORK: "${WDK_NETWORK:-sepolia}"
       WDK_TOKEN: "${WDK_TOKEN:-USDT}"
       WDK_WALLET_NAME: "${WDK_WALLET_NAME:-agent-dev}"
       WDK_MAX_TRANSFER_AMOUNT: "${WDK_MAX_TRANSFER_AMOUNT:-}"
