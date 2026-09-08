@@ -1,6 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readApiProcessConfig, readWorkerProcessConfig } from '../../src/config/process.js';
+import { readElevenLabsApiKey } from '../../src/config/privacy.js';
 
 function keyPair() {
   const keys = generateKeyPairSync('ed25519');
@@ -59,5 +60,15 @@ describe('process-specific configuration', () => {
     };
     expect(() => readWorkerProcessConfig(base)).toThrow('OPENAI_API_KEY is required');
     expect(readWorkerProcessConfig({ ...base, OPENAI_API_KEY: 'vault-openai-key' })).toBeDefined();
+  });
+});
+
+// The dedicated Vault key is consumed by the recorded-audio API; the current
+// live worker uses OpenAI. Preserve the alias without reverting that migration.
+describe('ElevenLabs API credential aliases', () => {
+  it('prioritizes the dedicated Vault name and trims whitespace', () => {
+    expect(readElevenLabsApiKey({ ELEVEN_LABS_API_KEY: ' dedicated ', ELEVEN_LABS: 'legacy', ELEVENLABS_API_KEY: 'compat' })).toBe('dedicated');
+    expect(readElevenLabsApiKey({ ELEVEN_LABS_API_KEY: ' ', ELEVEN_LABS: 'legacy' })).toBe('legacy');
+    expect(readElevenLabsApiKey({ ELEVENLABS_API_KEY: 'compat' })).toBe('compat');
   });
 });

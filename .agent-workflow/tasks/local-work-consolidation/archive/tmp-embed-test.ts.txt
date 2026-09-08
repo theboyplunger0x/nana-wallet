@@ -1,0 +1,15 @@
+import 'dotenv/config';
+const t0 = Date.now();
+const fs = await import('node:fs');
+const log = (m: string) => { fs.appendFileSync('/tmp/nana-local/embed.log', `${((Date.now() - t0) / 1000).toFixed(1)}s ${m}\n`); };
+log('inicio');
+const transformers = await import('@huggingface/transformers');
+log('import ok, version ' + (transformers.env as unknown as Record<string, unknown>).constructor?.name);
+transformers.env.cacheDir = '.cache/recipient-memory-model';
+transformers.env.localFilesOnly = true;
+log('env seteado, cargando pipeline');
+const pipeline = await transformers.pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { dtype: 'fp32' });
+log('pipeline cargado');
+const out = await pipeline('prueba de embedding', { pooling: 'mean', normalize: true });
+log('embed listo: ' + JSON.stringify(out.dims));
+process.exit(0);

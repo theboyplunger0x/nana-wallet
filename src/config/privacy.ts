@@ -37,7 +37,7 @@ export type VoiceProviderConfig = {
 export function readElevenLabsApiKey(
   environment: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  return environment.ELEVEN_LABS?.trim() || environment.ELEVENLABS_API_KEY?.trim() || undefined;
+  return environment.ELEVEN_LABS_API_KEY?.trim() || environment.ELEVEN_LABS?.trim() || environment.ELEVENLABS_API_KEY?.trim() || undefined;
 }
 
 function isTrue(value: string | undefined): boolean {
