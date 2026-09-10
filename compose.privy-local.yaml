@@ -1,0 +1,98 @@
+name: nana-privy-impl
+
+x-identity: &identity
+  IDENTITY_PROVIDER: privy
+  PRIVY_APP_ID: ${PRIVY_APP_ID:?}
+  PRIVY_VERIFICATION_KEY: ${PRIVY_VERIFICATION_KEY:?}
+  DATABASE_URL: postgresql://postgres@db:5432/wdk_agent?options=-csearch_path%3Dpublic,extensions
+  WDK_TOOLS_SOURCE: fixture
+  RECIPIENT_MEMORY_ENABLED: "true"
+  LIVEKIT_URL: ws://livekit:7880
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?}
+  LIVEKIT_AGENT_NAME: nani-agent
+  LIVE_VOICE_BINDING_PUBLIC_KEY: ${LIVE_VOICE_BINDING_PUBLIC_KEY:?}
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.1-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wdk_agent
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["recipient_memory_postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wdk_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  livekit:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.privy-livekit
+    restart: unless-stopped
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "127.0.0.1:17881:17881/tcp"
+      - "127.0.0.1:17881-17891:17881-17891/udp"
+    command: ["--config", "/etc/livekit.yaml"]
+  backend:
+    image: nana-privy-backend:local
+    build: .
+    restart: unless-stopped
+    environment:
+      <<: *identity
+      HOST: 0.0.0.0
+      PORT: "3000"
+      PRIVY_APP_SECRET: ${PRIVY_APP_SECRET:?}
+      PRIVY_AUTHORIZATION_KEY_QUORUM_ID: ${PRIVY_AUTHORIZATION_KEY_QUORUM_ID:?}
+      PRIVY_AUTHORIZATION_PUBLIC_KEY: ${PRIVY_AUTHORIZATION_PUBLIC_KEY:?}
+      LIVE_VOICE_ENABLED: "true"
+      LIVE_VOICE_BINDING_PRIVATE_KEY: ${LIVE_VOICE_BINDING_PRIVATE_KEY:?}
+      LIVEKIT_BROWSER_URL: wss://nana-privy.localhost/livekit
+      CORS_ORIGINS: https://nana-privy.localhost
+      AGENT_RUNTIME: llm
+      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?}
+    ports: ["127.0.0.1::3000"]
+    volumes: ["model_cache:/app/.cache/recipient-memory-model"]
+    depends_on:
+      db: {condition: service_healthy}
+      livekit: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  voice-worker:
+    image: nana-privy-backend:local
+    restart: unless-stopped
+    entrypoint: ["node", "dist/livekit/worker.js"]
+    command: ["dev"]
+    environment:
+      <<: *identity
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?}
+      LIVEKIT_AGENT_RUNTIME: native-livekit
+      AGENT_RUNTIME: llm
+      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?}
+    volumes: ["model_cache:/app/.cache/recipient-memory-model"]
+    depends_on:
+      backend: {condition: service_healthy}
+  frontend:
+    build:
+      context: apps/nana-wallet
+      dockerfile: docker/Dockerfile.privy
+      args:
+        VITE_PRIVY_APP_ID: ${PRIVY_APP_ID:?}
+    restart: unless-stopped
+    ports: ["127.0.0.1::80"]
+    depends_on:
+      backend: {condition: service_healthy}
+
+volumes:
+  recipient_memory_postgres:
+    external: true
+    name: nana-privy-impl_recipient_memory_postgres
+  model_cache:

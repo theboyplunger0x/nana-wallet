@@ -4,7 +4,7 @@
 
 Turn the Nana system into a real multi-user application: every authenticated request carries a verified Privy access token, the backend resolves each Privy identity to an internal `users` UUID, RLS scopes all data to that UUID, and the front bootstraps identity (`/v1/me`) and manages user contacts (`/v1/contacts`) through the same server-mediated isolation. The demo single-user mode remains the default for dev, tests, and CI.
 
-## Requirements
+## ADDED Requirements
 
 ### Requirement: PMU-001 Identity Provider Selection
 
@@ -179,7 +179,7 @@ The `users` table MUST have RLS ENABLED and FORCED, with a policy scoping rows t
 
 ### Requirement: PMU-010 /v1/contacts Update as New Version
 
-`PATCH /v1/contacts/:id` MUST update name, description, or address by creating a new version of the existing recipient rather than overwriting it. Updates MUST be scoped to the authenticated user and MUST NOT modify another user's record.
+`PATCH /v1/contacts/:id` MUST update name, description, or address by creating a new version of the existing recipient rather than overwriting it. Updates MUST be scoped to the authenticated user and MUST NOT modify another user's record. PATCH MUST require expectedVersion, reject a stale value with 409 and atomically retain the prior snapshot in owner-scoped recipient_versions while advancing the current recipients projection. The stable recipient ID MUST be preserved.
 
 #### Scenario: update creates new version
 
@@ -192,6 +192,14 @@ The `users` table MUST have RLS ENABLED and FORCED, with a policy scoping rows t
 - GIVEN a verified token for user A
 - WHEN `PATCH /v1/contacts/:id` targets user B's recipient
 - THEN it is rejected and no version is created
+
+
+#### Scenario: concurrent updates preserve history
+
+- GIVEN two PATCH requests carrying the same expectedVersion for an owned recipient
+- WHEN both attempt to change the contact
+- THEN one advances the current version and retains its prior snapshot, while the other returns 409
+- AND search/reveal uses only the current active projection
 
 ### Requirement: PMU-011 /v1/contacts Soft Delete
 
@@ -243,7 +251,7 @@ Every `/v1/contacts` endpoint MUST guarantee cross-user isolation through RLS pl
 
 ### Requirement: PMU-014 Text Path Per-Request Identity
 
-The text path MUST construct the memory runtime per request using the resolved `userId`, replacing the fixed `demoUserId`. The voice path MUST remain unchanged, scoping via `binding.sub`. No path MAY use a fixed `demoUserId` as the identity source.
+The text path MUST construct the memory runtime per request using the resolved `userId`, replacing the fixed `demoUserId`. The voice worker MUST continue scoping via `binding.sub`; token issuance MUST first authenticate the caller and verify conversation ownership (PMU-020). In `privy` mode no path MAY use a fixed `demoUserId`; `demo` mode resolves the configured sentinel UUID.
 
 #### Scenario: text path scopes to resolved user
 
@@ -251,7 +259,7 @@ The text path MUST construct the memory runtime per request using the resolved `
 - WHEN the text memory runtime is built
 - THEN it uses A's resolved UUID
 
-#### Scenario: voice path unchanged
+#### Scenario: voice identity comes from an authorized conversation
 
 - GIVEN a live voice session
 - WHEN memory tools scope
@@ -259,12 +267,12 @@ The text path MUST construct the memory runtime per request using the resolved `
 
 ### Requirement: PMU-015 Front Privy Login and Session
 
-The front MUST wrap the app with `PrivyProvider` using `VITE_PRIVY_APP_ID`, provide a login screen with SMS/WhatsApp and email, persist the Privy session, and provide logout. The `sessionStorage` token and the `"token-de-desarrollo"` fallback MUST be retired except for the demo path.
+The configured phone channel MUST be either SMS or WhatsApp according to the Privy app configuration, never an unsupported promise of both. The front MUST wrap the app with `PrivyProvider` using `VITE_PRIVY_APP_ID`, provide a login screen with email and configured phone OTP (SMS or WhatsApp), persist the Privy session, and provide logout. The `sessionStorage` token and the `"token-de-desarrollo"` fallback MUST be retired except for the demo path.
 
 #### Scenario: login flow
 
 - GIVEN the front with `VITE_PRIVY_APP_ID` configured
-- WHEN the user logs in via SMS, WhatsApp, or email
+- WHEN the user logs in via email or the configured phone channel
 - THEN a Privy session is established and the app continues authenticated
 
 #### Scenario: logout
@@ -342,3 +350,92 @@ The change MUST ship tests covering provider token verification (valid, expired,
 - GIVEN users A and B in the same database
 - WHEN each contacts endpoint is exercised across users
 - THEN no A/B cross-read or cross-mutation is observed
+
+### Requirement: PMU-020 Authorized Voice Tokens
+
+In Privy mode, `POST /v1/voice/room-token` MUST verify the access token and fetch the conversation under the resolved UUID with RLS before calling the issuer. Missing/invalid/expired authentication MUST return 401. A missing or foreign conversation MUST return the same 404. The issuer MUST derive participant identity from the resolved UUID and room name from the owned conversation. It MUST NOT accept caller-supplied identity or arbitrary agent dispatch. Existing TTL, grants and signed live-binding checks MUST remain enforced.
+
+#### Scenario: no token and foreign conversation
+
+- GIVEN users A and B with separate conversations
+- WHEN a caller has no token, or A requests B's room
+- THEN the response is respectively 401 or the same 404 as an absent conversation
+- AND the issuer is never called
+
+#### Scenario: owned room on either LiveKit deployment
+
+- GIVEN A owns the requested conversation and LiveKit is local or hosted
+- WHEN A requests a token
+- THEN the participant UUID and live binding subject are A and the grant permits only that conversation's room
+- AND the browser takes its expected identity from `/v1/me`, not `VITE_LIVEKIT_PARTICIPANT_IDENTITY`
+- AND the unauthenticated demo token-server path cannot be selected in Privy mode
+
+### Requirement: PMU-021 Account Transition Isolation
+
+Logout, session expiration and account switch MUST cancel user-scoped requests, clear React Query data and conversation/preview state, disconnect voice and discard late responses from the old session before rendering another user. Cache keys MUST include the internal UUID. A retry MUST retain the originating user and idempotency key; it MUST NOT replay A's request with B's token.
+
+#### Scenario: late response after switching accounts
+
+- GIVEN A has cached contacts, an open voice room and an in-flight mutation
+- WHEN A logs out and B logs in before the response arrives
+- THEN no A data, transcript, room or confirmation remains accessible to B
+- AND the late result cannot populate B's cache or trigger a retry as B
+
+### Requirement: PMU-022 Provisioning Under FORCE RLS
+
+Provisioning MUST work with a non-superuser, NOBYPASSRLS migration owner. The new `users` table MUST have a provisioning policy restricted to that actual owner, alongside the self-read policy restricted to `recipient_app`. The owner-only SECURITY DEFINER function MUST use schema-qualified objects and a safe search path. PUBLIC and recipient_app MUST lack EXECUTE; recipient_app MUST lack membership allowing SET ROLE to the owner. Existing user-data policies MUST remain unchanged. Runtime role and function ownership MUST be checked explicitly, never inferred from a successful superuser test.
+
+#### Scenario: ordinary owner provisions first login
+
+- GIVEN FORCE RLS and a non-superuser owner without BYPASSRLS
+- WHEN the trusted backend calls the provisioning function twice and concurrently for a verified DID
+- THEN one UUID is returned and one user exists
+
+#### Scenario: application role cannot provision identities
+
+- GIVEN the recipient_app role scoped to A
+- WHEN it attempts to invoke provisioning, assume the owner or read B
+- THEN all three operations are denied or reveal zero foreign rows
+
+### Requirement: PMU-023 Runnable Migration and Contract Gates
+
+A fresh local database MUST acquire the conversation tables before the users migration adds their foreign keys. Tests MUST cover both the local migration sequence and Supabase sequence, plus upgrade from an existing demo database. Contract parity MUST be validated through shared JSON examples tested separately in each project, without importing backend code into frontend or vice versa.
+
+#### Scenario: clean database and independent contracts
+
+- GIVEN a clean local database and separately compiled frontend/backend
+- WHEN their migration and contract tests run
+- THEN all prerequisites exist and the same HTTP examples pass both independent schemas
+- AND no cross-project import is introduced
+
+### Requirement: PMU-024 Identity Foundation Cannot Spend a Shared Wallet
+
+Until the dependent per-user wallet change is implemented and verified, `IDENTITY_PROVIDER=privy` MUST reject startup with a funded/live singleton wallet provider. Fixture preview and confirmation remain available for verification. Wallet, conversation and paid voice routes MUST authenticate in Privy mode; health remains public with redacted operational data.
+
+#### Scenario: shared wallet in Privy mode
+
+- GIVEN Privy authentication and a live WDK or Circle singleton provider
+- WHEN the foundation starts
+- THEN startup rejects before serving financial operations
+
+### Requirement: PMU-025 Observable End-to-End Verification
+
+Delivery MUST include backend lint, typecheck, unit/integration tests with a running database, evals and build; frontend lint, typecheck, tests and build; browser E2E through the real fixture backend; and a Privy web login smoke for each promised login method. A test identity adapter MAY replace the external SDK only in the deterministic browser harness and MUST NOT be reachable in production. Missing external credentials or OTP access MUST be reported as a blocked live check, never as a pass.
+
+#### Scenario: browser identity and memory journey
+
+- GIVEN two browser sessions and the fixture backend with a migrated database
+- WHEN A logs in, creates a contact, asks the agent to use it, previews and cancels, then logs out and B logs in
+- THEN the owned contact is used for A, no transfer occurs on cancel, and B sees none of A's data
+- AND unauthorized voice-token requests are rejected
+
+### Requirement: PMU-026 Supported Phone Login Channel
+
+The app MUST offer email plus the phone OTP channel actually configured in Privy. It MUST NOT advertise SMS and WhatsApp simultaneously when the provider permits only one. Implementation MUST first record the existing channel or obtain a product decision if the app is not configured; no dashboard channel changes are authorized by this specification.
+
+#### Scenario: one phone channel configured
+
+- GIVEN the Privy app is configured for SMS or WhatsApp
+- WHEN the login UI and live smoke run
+- THEN email and that configured channel are offered and tested
+- AND the other phone channel is not presented as available

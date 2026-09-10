@@ -17,6 +17,9 @@ export type ErrCode =
   | "SIN_PERMISO"
   | "NO_ENCONTRADO"
   | "DATOS_INVALIDOS"
+  | "INVALID_QUERY"
+  | "WALLET_DATOS_INVALIDOS"
+  | "BALANCE_NO_DISPONIBLE"
   | "SALDO_INSUFICIENTE"
   | "LIMITE_DIARIO"
   | "CONFIRMACION_VENCIDA"
@@ -68,21 +71,29 @@ export type MovementsPage = {
 
 export type Contact = {
   id: string;
-  displayName: string;
-  relationship: string;
-  alias: string | null;
-  cbuLast4: string;
-  bankName: string | null;
-  holderName: string;
-  verifiedAt: ISODateTime | null;
-  avatarInitials: string;
+  name: string;
+  description: string;
+  address: string;
+  version: number;
+  status: "active" | "inactive";
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
 };
 
-export type CreateContactInput = Omit<Contact, "id" | "verifiedAt">;
+export type CreateContactInput = {
+  name: string;
+  description: string;
+  address: string;
+};
 
-export type UpdateContactInput = Partial<CreateContactInput>;
+export type UpdateContactInput = {
+  name?: string;
+  description?: string;
+  address?: string;
+  expectedVersion: number;
+};
 
-export type RevealedCbu = { cbu: string };
+export type RevealedCbu = { id: string; address: string };
 
 export type AgendaEvent = {
   id: string;
@@ -234,16 +245,9 @@ export type ConversationState = {
   error?: { code: string; message: string };
 };
 
-export type Me = {
-  displayName: string;
-  greetingName: string;
-  initials: string;
-  documentLast3: string;
-  city: string;
-  verifiedAt: ISODateTime | null;
-  verificationHuman: string;
-  dailyLimit: Money;
-  dailySpent: Money;
+export type MeResponse = {
+  userId: string;
+  displayName: string | null;
 };
 
 export type ConfirmableIntent = {
@@ -254,3 +258,122 @@ export type ConfirmableIntent = {
 };
 
 export type EmptyResponse = Record<string, never>;
+
+/** PEW-005: identity != wallet readiness. Mirrors backend walletReadinessStateSchema. */
+export type WalletReadinessState =
+  "unprovisioned" | "provisioning" | "ready" | "recovery_required" | "conflict" | "unavailable";
+
+export type CurrentWalletResponse = {
+  userId: string;
+  state: WalletReadinessState;
+  address: string;
+  chainFamily: string;
+  provider: string;
+};
+
+export type WalletSyncResponse = {
+  userId: string;
+  state: WalletReadinessState;
+  address: string;
+  created: boolean;
+};
+
+/** PEW-013: permission lifecycle is separate from login and payment confirmation. */
+export type PermissionState = "pending" | "active" | "revoking" | "revoked" | "unavailable";
+
+export type WalletPermissionResponse = {
+  userId: string;
+  state: PermissionState;
+  perTransferUsdc: string;
+  rollingTotalUsdc: string;
+  rollingWindowSeconds: number;
+  gasCeiling: string;
+  recipients: string[];
+  aggregateOvershootCaveat: boolean;
+  // PEW-014: rolling-window aggregation is provider-unproven and surfaced as a
+  // hard payment block; optional so older fixtures still parse.
+  aggregationReady?: boolean;
+  aggregateBlockReason?: string;
+};
+
+/** PEW-013: activation returns the read-back-verified permission summary. */
+export type WalletActivationResponse = WalletPermissionResponse;
+
+export type ActivateWalletPermissionInput = {
+  recipients: string[];
+};
+
+/** PEW-014: signer enrollment prepare posts the explicit recipient allowlist. */
+export type EnrollmentPrepareInput = {
+  recipients: string[];
+};
+
+export type EnrollmentPreparationResponse = {
+  walletId: string;
+  walletAddress: string;
+  policyId: string;
+  quorumId: string;
+  perTransferUsdc: string;
+  rollingTotalUsdc: string;
+  windowSeconds: number;
+  aggregationReady: false;
+  aggregateBlockReason: string;
+};
+
+export type EnrollmentCompleteInput = {
+  walletId: string;
+};
+
+export type EnrollmentCompleteResponse = {
+  verified: boolean;
+  state: PermissionState;
+  permission?: WalletPermissionResponse;
+  observed?: {
+    walletOwnerMatches: boolean;
+    policyAttached: boolean;
+    observedPolicyIds: string[];
+    observedSignerIds: string[];
+  };
+};
+
+export type WalletRevokeResponse = {
+  userId: string;
+  state: PermissionState;
+  remote: "revoked" | "unavailable";
+};
+
+// wallet-profile (WP-004/WP-005): duplicated manually from the backend
+// balances contract in `src/contracts/http.ts`. The catalog is fixed on the
+// server; the client never selects chain, token or owner.
+export const ARC_TESTNET_CHAIN_ID = 5042002;
+
+export type BalanceAsset = {
+  tokenId: "5042002:0x3600000000000000000000000000000000000000";
+  contract: "0x3600000000000000000000000000000000000000";
+  symbol: "USDC";
+  name: "USD Coin";
+  decimals: 6;
+  balanceAtomic: string;
+};
+
+export type BalancesReadyData = {
+  walletState: "ready";
+  address: string;
+  chainId: 5042002;
+  networkName: "Arc testnet";
+  testnet: true;
+  source: "fixture" | "rpc";
+  observedAt: ISODateTime;
+  assets: [BalanceAsset];
+};
+
+export type BalancesNotReadyData = {
+  walletState: Exclude<WalletReadinessState, "ready">;
+  chainId: 5042002;
+  networkName: "Arc testnet";
+  testnet: true;
+  observedAt: null;
+  assets: [];
+};
+
+export type BalancesData = BalancesReadyData | BalancesNotReadyData;

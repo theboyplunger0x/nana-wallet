@@ -1,0 +1,19 @@
+# .gitleaksignore — reviewed dispositions (2026-09-08, implementation session)
+#
+# All entries below were inspected with evidence and are NOT real credentials:
+# - Synthetic redaction/telemetry TEST fixtures (literal filler strings used to
+#   assert redaction behavior), no credential material.
+# - 42-char hex Ethereum test-fixture ADDRESSES (public identifiers, not keys).
+# - Empty placeholder value and commented example PEM header template in
+#   .env.example; documentation PEM template in the LiveKit runbook.
+# - Historical archived .txt copies of planning artifacts.
+# Full evidence and rationale: .agent-workflow/tasks/privy-embedded-wallets/development-status.md
+.agent-workflow/tasks/local-work-consolidation/archive/observability-research/tests/unit/telemetry-boundary.test.ts.txt:generic-api-key:111
+.env.example:private-key:111
+.env.example:generic-api-key:65
+docs/livekit-development-runbook.md:private-key:58
+tests/integration/api-wallet-official-wdk.test.ts:generic-api-key:29
+tests/unit/redaction.test.ts:generic-api-key:7
+tests/unit/redaction.test.ts:generic-api-key:8
+tests/unit/wallet-api-normalization.test.ts:generic-api-key:20
+tests/unit/telemetry-boundary.test.ts:generic-api-key:138

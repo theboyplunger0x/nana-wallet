@@ -9,6 +9,7 @@ import { RouteError, RoutePending } from "@/components/RouteStates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, createConversationTurnSender, getErrorMessage, queryKeys } from "@/lib/api";
+import { ARC_TESTNET_CHAIN_ID } from "@/lib/api-types";
 import type { ConversationTurnResult } from "@/lib/api-types";
 import {
   runExclusiveConversationAction,
@@ -172,12 +173,36 @@ function AgentePage() {
   );
 
   const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: api.getMe });
+  const userId = meQuery.data?.userId;
 
   function refreshMoneyQueries() {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.movements });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bills });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.movements(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bills(userId) });
+    // WP-014: money refreshes also invalidate the personal balances cache
+    // for the CURRENT user only (user-scoped key root "balances").
+    if (userId) {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.balances(userId, ARC_TESTNET_CHAIN_ID),
+      });
+    }
   }
+
+  // WP-014: the authoritative conversation state reaching a confirmed
+  // transaction invalidates balances exactly once per transaction hash.
+  // This covers the text path (sent turn → state), the button decision
+  // (decide → refresh(revision)) and the voice path (refreshRevision),
+  // without extra dispatches and without touching preview/confirm/idempotency.
+  const lastInvalidatedTransactionRef = useRef<string | null>(null);
+  const confirmedTransactionHash = conversation.state?.transaction?.transactionHash ?? null;
+  useEffect(() => {
+    if (!confirmedTransactionHash || !userId) return;
+    if (lastInvalidatedTransactionRef.current === confirmedTransactionHash) return;
+    lastInvalidatedTransactionRef.current = confirmedTransactionHash;
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.balances(userId, ARC_TESTNET_CHAIN_ID),
+    });
+  }, [confirmedTransactionHash, userId, queryClient]);
 
   function lockUnknownOutcome() {
     confirmationPendingRef.current = false;

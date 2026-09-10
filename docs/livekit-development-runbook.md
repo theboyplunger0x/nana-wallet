@@ -55,7 +55,7 @@ DEMO_USER_ID=11111111-1111-4111-8111-111111111111
 WDK_TOOLS_SOURCE=fixture
 AGENT_RUNTIME=deterministic
 LIVE_VOICE_ENABLED=true
-LIVE_VOICE_BINDING_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
+LIVE_VOICE_BINDING_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n # gitleaks:allow (runbook template)...\n-----END PRIVATE KEY-----
 LIVE_VOICE_BINDING_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----
 # Local default: self-hosted LiveKit from the compose stack.
 LIVEKIT_URL=ws://localhost:7880

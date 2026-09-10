@@ -14,6 +14,7 @@ import {
   type LiveKitWorkerConfig,
   type WorkerProcessConfig,
 } from "../config/process.js";
+import { resolveDefaultAgentName } from "../config/livekit.js";
 import { FinancialTaskRegistry } from "../conversations/financial-task-registry.js";
 import { createWalletConversationService } from "../conversations/service.js";
 import { getConfiguredRecipientMemoryService } from "../memory/runtime.js";
@@ -91,7 +92,9 @@ async function runJob(
       const voiceService = createWalletConversationService({
         conversations: dependencies.conversations,
         wallet: dependencies.wallet,
-        ...(memoryService ? { memory: { userId: binding.userId, service: memoryService } } : {}),
+        ...(memoryService
+          ? { memory: { userId: binding.userId, service: memoryService } }
+          : {}),
         financialTasks: dependencies.financialTasks,
         contextRenewal: dependencies.contextRenewal,
       });
@@ -200,6 +203,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   cli.runApp(
     new ServerOptions({
       agent: fileURLToPath(import.meta.url),
+      // The room token issuer dispatches explicitly by agent name
+      // (token-issuer.ts → RoomConfiguration.agents, default
+      // LIVEKIT_AGENT_NAME ?? 'nani-agent'). The worker must register under
+      // the SAME name or explicit dispatch targets no registered worker.
+      // resolveDefaultAgentName is the shared source both sides use.
+      agentName: resolveDefaultAgentName(),
       wsURL: config.url,
       apiKey: config.apiKey,
       apiSecret: config.apiSecret,

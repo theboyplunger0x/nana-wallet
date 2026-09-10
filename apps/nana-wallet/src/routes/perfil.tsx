@@ -1,473 +1,132 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { CalendarDays, CalendarHeart, Copy, ReceiptText, Users } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useLogout } from "@privy-io/react-auth";
+import { LogOut } from "lucide-react";
+import { useState } from "react";
 
-import { ConfirmarPlata } from "@/components/ConfirmarPlata";
-import { EmptyState, RouteError, RoutePending } from "@/components/RouteStates";
+import { RouteError, RoutePending } from "@/components/RouteStates";
 import { Button } from "@/components/ui/button";
-import { api, createConversationTurnSender, getErrorMessage, queryKeys } from "@/lib/api";
-import type { Bill, ConfirmableIntent, Contact, ConversationTurnResult } from "@/lib/api-types";
-import {
-  runExclusiveConversationAction,
-  shouldLockAfterConversationResolution,
-  UNKNOWN_CONVERSATION_OUTCOME_MESSAGE,
-} from "@/lib/session-action-lock";
-
-const AGENDA_WINDOW_DAYS = 90;
+import { api, getErrorMessage, queryKeys } from "@/lib/api";
+import { resetSession } from "@/lib/session-isolation";
 
 /**
- * Se calcula por render, no a nivel de modulo. En un isolate caliente de Cloudflare
- * o en una pestaña que queda abierta varios dias, una constante de modulo deja la
- * ventana anclada a la fecha del primer request y el queryKey nunca cambia.
+ * wallet-profile (WP-001/WP-002): a simple identity-only profile screen.
+ *
+ * /perfil renders the display name (or its explicit absence), keeps Salir and
+ * its own load/error/retry for /me, and NEVER waits for contacts, agenda,
+ * bills, wallet summary or permissions. The preserved legacy sections live in
+ * `features/profile/LegacyProfileSections.tsx` and are intentionally not
+ * mounted here (WP-015).
  */
-function getAgendaWindow() {
-  const today = new Date();
-  const end = new Date(today);
-  end.setDate(end.getDate() + AGENDA_WINDOW_DAYS);
-  return { from: today.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
-}
+
+const isPrivyEnabled = import.meta.env["VITE_IDENTITY_PROVIDER"] === "privy";
 
 export const Route = createFileRoute("/perfil")({
   head: () => ({
     meta: [
-      { title: "Mi perfil y agenda | Nana Wallet" },
+      { title: "Mi perfil | Nana Wallet" },
       {
         name: "description",
-        content: "Tus datos, tu familia guardada, tu agenda y el calendario de facturas por pagar.",
+        content: "Tus datos, en letra grande y sin vueltas.",
       },
-      { property: "og:title", content: "Mi perfil y agenda" },
+      { property: "og:title", content: "Mi perfil" },
       {
         property: "og:description",
-        content: "Contactos, fechas importantes y facturas, todo en un solo lugar.",
+        content: "Tu nombre, tal como lo conocemos, y la salida de sesión.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  pendingComponent: () => <RoutePending label="Estamos buscando tu perfil y tu agenda" />,
+  pendingComponent: () => <RoutePending label="Estamos buscando tu perfil" />,
   errorComponent: ({ error, reset }) => <RouteError error={error} onRetry={reset} />,
   component: PerfilPage,
 });
 
-function formatAgendaDate(date: string) {
-  return new Intl.DateTimeFormat("es-AR", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${date}T00:00:00Z`));
-}
-
-function contactName(contact: Contact) {
-  return `${contact.displayName} (${contact.relationship.toLocaleLowerCase("es-AR")})`;
+function LogoutButton() {
+  const { logout } = useLogout();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  async function handleLogout() {
+    // WP-013: session reset aborts in-flight requests and clears the cache
+    // before navigating away, so nothing of this user survives.
+    resetSession();
+    queryClient.clear();
+    await logout();
+    void navigate({ to: "/login" });
+  }
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="press shrink-0"
+      onClick={() => void handleLogout()}
+    >
+      <LogOut className="size-5" aria-hidden="true" />
+      Salir
+    </Button>
+  );
 }
 
 function PerfilPage() {
-  const queryClient = useQueryClient();
-  const [copyStatus, setCopyStatus] = useState<{ contactId: string; message: string } | null>(null);
-  const [copyingContactId, setCopyingContactId] = useState<string | null>(null);
-  const [preparingId, setPreparingId] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [activeIntent, setActiveIntent] = useState<ConfirmableIntent | null>(null);
-  const [agentTurn, setAgentTurn] = useState<ConversationTurnResult | null>(null);
-  const [, setConversationId] = useState<string | null>(null);
-  const conversationIdRef = useRef<string | null>(null);
-  const sessionActionLockRef = useRef(false);
-  const confirmationPendingRef = useRef(false);
-  const sessionActionsLockedRef = useRef(false);
-  const [isSessionActionPending, setIsSessionActionPending] = useState(false);
-  const [isAgentConfirmationPending, setIsAgentConfirmationPending] = useState(false);
-  const [areSessionActionsLocked, setAreSessionActionsLocked] = useState(false);
-  const [sessionActionId, setSessionActionId] = useState<string | null>(null);
-  const sendConversationTurn = useMemo(
-    () =>
-      createConversationTurnSender(
-        () => conversationIdRef.current,
-        (nextConversationId) => {
-          conversationIdRef.current = nextConversationId;
-          setConversationId(nextConversationId);
-        },
-      ),
-    [],
-  );
-
-  const { from: agendaFrom, to: agendaTo } = getAgendaWindow();
-
+  // WP-002: the identity query is the only requirement of this screen.
   const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: api.getMe });
-  const contactsQuery = useQuery({ queryKey: queryKeys.contacts, queryFn: api.getContacts });
-  const agendaQuery = useQuery({
-    queryKey: queryKeys.agenda(agendaFrom, agendaTo),
-    queryFn: () => api.getAgenda({ from: agendaFrom, to: agendaTo }),
-  });
-  const billsQuery = useQuery({ queryKey: queryKeys.bills, queryFn: () => api.getBills() });
-  const walletQuery = useQuery({ queryKey: queryKeys.wallet, queryFn: api.getWalletSummary });
+  const [isRetrying, setIsRetrying] = useState(false);
 
-  const isPending =
-    meQuery.isPending ||
-    contactsQuery.isPending ||
-    agendaQuery.isPending ||
-    billsQuery.isPending ||
-    walletQuery.isPending;
-  const firstError =
-    meQuery.error ??
-    contactsQuery.error ??
-    agendaQuery.error ??
-    billsQuery.error ??
-    walletQuery.error;
-
-  function refetchAll() {
-    void Promise.all([
-      meQuery.refetch(),
-      contactsQuery.refetch(),
-      agendaQuery.refetch(),
-      billsQuery.refetch(),
-      walletQuery.refetch(),
-    ]);
-  }
-
-  async function copyCbu(contact: Contact) {
-    setCopyingContactId(contact.id);
-    setCopyStatus(null);
-    let cbu: string;
-    try {
-      const response = await api.revealContactCbu(contact.id);
-      cbu = response.cbu;
-    } catch (error) {
-      setCopyStatus({
-        contactId: contact.id,
-        message: getErrorMessage(error),
-      });
-      setCopyingContactId(null);
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(cbu);
-      const message = `Copiaste el CBU de ${contact.displayName}`;
-      setCopyStatus({ contactId: contact.id, message });
-      toast.success(message);
-    } catch {
-      setCopyStatus({
-        contactId: contact.id,
-        message: "El teléfono no pudo copiar el CBU. Probá de nuevo.",
-      });
-    } finally {
-      setCopyingContactId(null);
-    }
-  }
-
-  async function prepareBillPayment(bill: Bill) {
-    const pesosAccount = walletQuery.data?.accounts.find((account) => account.kind === "pesos");
-    if (!pesosAccount) {
-      setActionMessage("No encontramos tu cuenta en pesos. Probá de nuevo en un ratito.");
-      return;
-    }
-    setPreparingId(bill.id);
-    setActionMessage(null);
-    try {
-      const intent = await api.createBillPaymentIntent(bill.id, { accountId: pesosAccount.id });
-      setActiveIntent({ kind: "bill_payment", ...intent });
-    } catch (error) {
-      setActionMessage(getErrorMessage(error));
-    } finally {
-      setPreparingId(null);
-    }
-  }
-
-  function lockUnknownAgentOutcome() {
-    confirmationPendingRef.current = false;
-    sessionActionsLockedRef.current = true;
-    setIsAgentConfirmationPending(false);
-    setAreSessionActionsLocked(true);
-    setAgentTurn(null);
-    setActionMessage(UNKNOWN_CONVERSATION_OUTCOME_MESSAGE);
-    refreshMoneyQueries();
-  }
-
-  function runAgentAction(message: string, kind: "new" | "resolution", actionId: string) {
-    if (sessionActionsLockedRef.current) return;
-    if (kind === "new" && confirmationPendingRef.current) return;
-
-    const request = runExclusiveConversationAction(sessionActionLockRef, async () => {
-      setIsSessionActionPending(true);
-      setSessionActionId(actionId);
-      setActionMessage(null);
+  if (meQuery.isPending) return <RoutePending label="Estamos buscando tu perfil" />;
+  if (meQuery.isError) {
+    async function retry() {
+      setIsRetrying(true);
       try {
-        const nextTurn = await sendConversationTurn(message);
-        if (kind === "resolution" && shouldLockAfterConversationResolution(nextTurn, "response")) {
-          lockUnknownAgentOutcome();
-          return;
-        }
-
-        const nextConfirmationPending = nextTurn.status === "confirmation_required";
-        confirmationPendingRef.current = nextConfirmationPending;
-        setIsAgentConfirmationPending(nextConfirmationPending);
-        setAgentTurn(nextTurn);
-        if (nextTurn.status === "error") setActionMessage(nextTurn.message);
-        if (nextTurn.status === "sent") refreshMoneyQueries();
-      } catch (error) {
-        if (kind === "resolution" && shouldLockAfterConversationResolution(error, "thrown")) {
-          lockUnknownAgentOutcome();
-        } else {
-          setActionMessage(getErrorMessage(error));
-        }
+        await meQuery.refetch();
       } finally {
-        setIsSessionActionPending(false);
-        setSessionActionId(null);
+        setIsRetrying(false);
       }
-    });
-
-    void request;
-  }
-
-  function prepareSuggestedAction(label: string, eventId: string) {
-    runAgentAction(label, "new", eventId);
-  }
-
-  function sendAgentFollowup(message: "confirm" | "cancel") {
-    runAgentAction(message, "resolution", "agent-confirmation");
-  }
-
-  function closeConfirmation() {
-    setActiveIntent(null);
-  }
-
-  function refreshMoneyQueries() {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.movements });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bills });
-  }
-
-  function closeReceipt() {
-    setActiveIntent(null);
-    refreshMoneyQueries();
-  }
-
-  /**
-   * El usuario sale sin saber si la plata se movió. Cerramos igual que un recibo,
-   * refrescando saldo y movimientos, para que lo primero que vea sea el estado real.
-   */
-  function closeAfterUnknownOutcome() {
-    setActiveIntent(null);
-    setActionMessage("Fijate en tu saldo y en tus movimientos si la operación se hizo.");
-    refreshMoneyQueries();
-  }
-
-  if (isPending) return <RoutePending label="Estamos buscando tu perfil y tu agenda" />;
-  if (firstError) return <RouteError error={firstError} onRetry={refetchAll} />;
-  if (
-    !meQuery.data ||
-    !contactsQuery.data ||
-    !agendaQuery.data ||
-    !billsQuery.data ||
-    !walletQuery.data
-  ) {
-    return <RoutePending label="Estamos buscando tu perfil y tu agenda" />;
+    }
+    return (
+      <main className="mx-auto max-w-md px-6 pt-12 pb-40">
+        <section className="surface-card p-5" role="alert">
+          <h1 className="text-xl font-extrabold">No pudimos leer tu perfil</h1>
+          <p className="mt-2 text-base text-muted-foreground">{getErrorMessage(meQuery.error)}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="press mt-4 min-h-12 w-full text-base font-extrabold"
+            onClick={() => void retry()}
+            disabled={isRetrying}
+          >
+            {isRetrying ? "Reintentando" : "Probar de nuevo"}
+          </Button>
+        </section>
+      </main>
+    );
   }
 
   const me = meQuery.data;
-  const contacts = contactsQuery.data;
-  const events = agendaQuery.data;
-  const bills = billsQuery.data;
+  // WP-001: null, empty or whitespace-only names are all "absent". Nothing is
+  // persisted and no identifier (userId/DID) is ever displayed.
+  const displayName = me.displayName?.trim() ? me.displayName : null;
 
   return (
     <main className="mx-auto max-w-md px-6 pt-12 pb-40">
       <section className="surface-card flex items-center gap-4 p-5">
-        <div className="plastic flex size-16 shrink-0 items-center justify-center rounded-full text-2xl font-extrabold">
-          {me.initials}
-        </div>
-        <div>
-          <h1 className="text-2xl font-extrabold">{me.displayName}</h1>
-          <p className="mt-1 text-base text-muted-foreground">
-            DNI terminado en {me.documentLast3}
-          </p>
-          <p className="text-base text-muted-foreground">{me.city}</p>
-        </div>
-      </section>
-
-      <h2 className="mt-10 flex items-center gap-2 text-xl font-extrabold">
-        <Users className="size-6 text-brand-ink" strokeWidth={2.4} aria-hidden="true" /> Mi familia
-        guardada
-      </h2>
-      {contacts.length === 0 ? (
-        <EmptyState>
-          Todavía no tenés familiares guardados. Cuando agregues uno, va a aparecer acá.
-        </EmptyState>
-      ) : (
-        <ul className="mt-4 space-y-3">
-          {contacts.map((contact) => (
-            <li key={contact.id} className="surface-card p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-lg font-bold">{contactName(contact)}</p>
-                  <p className="mt-1 break-words text-base text-muted-foreground">
-                    {contact.alias ?? "Sin alias guardado"}
-                  </p>
-                  <p className="text-base text-muted-foreground">
-                    CBU terminado en {contact.cbuLast4}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="press shrink-0 rounded-xl bg-secondary p-4 text-secondary-foreground"
-                  aria-label={`Copiar CBU de ${contact.displayName}`}
-                  onClick={() => void copyCbu(contact)}
-                  disabled={copyingContactId === contact.id}
-                >
-                  <Copy className="size-6" strokeWidth={2.4} aria-hidden="true" />
-                </button>
-              </div>
-              {copyStatus?.contactId === contact.id ? (
-                <p className="mt-3 text-base font-bold" role="status">
-                  {copyStatus.message}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <section className="mt-10 rounded-2xl border border-border bg-secondary p-5">
-        <h2 className="flex items-center gap-2 text-xl font-extrabold">
-          <CalendarHeart className="size-7 text-brand-ink" strokeWidth={2.4} aria-hidden="true" />{" "}
-          Mi agenda
-        </h2>
-        <p className="mt-2 text-lg text-muted-foreground">
-          Cumpleaños, turnos y recordatorios importantes.
-        </p>
-        {events.length === 0 ? (
-          <p className="mt-4 rounded-2xl bg-card p-5 text-lg text-muted-foreground">
-            No tenés fechas guardadas para los próximos días.
-          </p>
-        ) : (
-          <ul className="mt-4 space-y-4">
-            {events.map((event) => (
-              <li key={event.id} className="rounded-2xl border border-border bg-card p-4">
-                <p className="text-lg font-extrabold">{event.title}</p>
-                <p className="mt-1 text-base font-bold text-brand-ink">
-                  {formatAgendaDate(event.date)}
-                </p>
-                {event.note ? (
-                  <p className="mt-1 text-base text-muted-foreground">{event.note}</p>
-                ) : null}
-                {event.suggestedAction ? (
-                  <Button
-                    variant="outline"
-                    className="press mt-4 min-h-14 w-full whitespace-normal text-lg font-extrabold"
-                    onClick={() =>
-                      prepareSuggestedAction(event.suggestedAction?.label ?? "", event.id)
-                    }
-                    disabled={
-                      isSessionActionPending ||
-                      isAgentConfirmationPending ||
-                      areSessionActionsLocked
-                    }
-                  >
-                    {sessionActionId === event.id ? "Preparando" : event.suggestedAction.label}
-                  </Button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {agentTurn ? (
-        <section className="surface-card mt-4 border-2 border-brand-ink p-4" aria-live="polite">
-          <p className="text-base leading-snug">{agentTurn.message}</p>
-          {agentTurn.status === "confirmation_required" ? (
-            <>
-              <dl className="mt-3 space-y-1.5 text-sm sm:text-base">
-                <div className="flex justify-between gap-4">
-                  <dt className="font-bold">Monto</dt>
-                  <dd>
-                    {agentTurn.preview.amount} {agentTurn.preview.token}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="font-bold">Destino</dt>
-                  <dd className="break-all text-right">{agentTurn.preview.recipient}</dd>
-                </div>
-              </dl>
-              <div className="mt-3 grid w-full grid-cols-1">
-                <Button
-                  variant="outline"
-                  className="press min-h-12 whitespace-normal text-base font-extrabold"
-                  onClick={() => sendAgentFollowup("cancel")}
-                  disabled={isSessionActionPending || areSessionActionsLocked}
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </>
-          ) : null}
-        </section>
-      ) : null}
-
-      <h2 className="mt-10 flex items-center gap-2 text-xl font-extrabold">
-        <CalendarDays className="size-6 text-brand-ink" strokeWidth={2.4} aria-hidden="true" />
-        Facturas del mes
-      </h2>
-      {bills.length === 0 ? (
-        <EmptyState>
-          No tenés facturas para este mes. Cuando llegue una, la vas a ver acá.
-        </EmptyState>
-      ) : (
-        <ul className="mt-4 space-y-3">
-          {bills.map((bill) => (
-            <li key={bill.id} className="surface-card p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-lg font-bold">{bill.provider}</p>
-                  <p className="text-base text-muted-foreground">Vence {bill.dueDateHuman}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-extrabold">{bill.amount.display}</p>
-                  <p
-                    className={`text-base font-bold ${
-                      bill.status === "vencida" ? "text-destructive" : "text-muted-foreground"
-                    }`}
-                  >
-                    {bill.statusHuman}
-                  </p>
-                </div>
-              </div>
-              {bill.canPayNow ? (
-                <Button
-                  variant="outline"
-                  className="press mt-4 min-h-14 w-full text-lg font-extrabold"
-                  onClick={() => void prepareBillPayment(bill)}
-                  disabled={preparingId === bill.id}
-                >
-                  <ReceiptText className="size-6" aria-hidden="true" />
-                  {preparingId === bill.id ? "Preparando" : "Pagar ahora"}
-                </Button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {actionMessage ? (
-        <p
-          className="mt-5 rounded-2xl bg-destructive-surface text-destructive-surface-foreground border border-border p-4 text-lg font-bold"
-          role="alert"
+        <div
+          className="plastic flex size-16 shrink-0 items-center justify-center rounded-full text-2xl font-extrabold"
+          aria-hidden="true"
         >
-          {actionMessage}
-        </p>
-      ) : null}
-
-      {activeIntent ? (
-        <ConfirmarPlata
-          key={activeIntent.intentId}
-          intent={activeIntent}
-          onCancel={closeConfirmation}
-          onExpired={closeConfirmation}
-          onCloseReceipt={closeReceipt}
-          onUnknownOutcome={closeAfterUnknownOutcome}
-        />
-      ) : null}
+          {displayName ? displayName.charAt(0).toLocaleUpperCase("es-AR") : "N"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-extrabold">Tu perfil</h1>
+          <p
+            className="mt-1 break-words text-2xl font-extrabold"
+            {...(displayName ? {} : { "data-testid": "profile-name-absent" })}
+          >
+            {displayName ?? "Todavía no tenemos tu nombre"}
+          </p>
+        </div>
+        {isPrivyEnabled ? <LogoutButton /> : null}
+      </section>
     </main>
   );
 }

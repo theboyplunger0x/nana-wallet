@@ -256,4 +256,220 @@ export const voiceRoomTokenResponseSchema = z.object({
   participantToken: z.string().min(1),
   roomName: z.string().min(1),
 });
-export type VoiceRoomTokenResponse = z.infer<typeof voiceRoomTokenResponseSchema>;
+export type VoiceRoomTokenResponse = z.infer<
+  typeof voiceRoomTokenResponseSchema
+>;
+
+export const meResponseSchema = z.object({
+  userId: z.string().uuid(),
+  displayName: z.string().nullable(),
+});
+export type MeResponse = z.infer<typeof meResponseSchema>;
+
+export const contactSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  description: z.string(),
+  address: z.string().min(1),
+  version: z.number().int().positive(),
+  status: z.enum(["active", "inactive"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Contact = z.infer<typeof contactSchema>;
+
+export const createContactInputSchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().trim().default(""),
+  address: z.string().trim().min(1),
+});
+export type CreateContactInput = z.infer<typeof createContactInputSchema>;
+
+export const updateContactInputSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  description: z.string().trim().optional(),
+  address: z.string().trim().min(1).optional(),
+  expectedVersion: z.number().int().positive(),
+});
+export type UpdateContactInput = z.infer<typeof updateContactInputSchema>;
+
+export const revealedCbuSchema = z.object({
+  id: z.string().uuid(),
+  address: z.string().min(1),
+});
+export type RevealedCbu = z.infer<typeof revealedCbuSchema>;
+
+/** PEW-005: identity != wallet readiness. These are the possible per-wallet states. */
+export const walletReadinessStateSchema = z.enum([
+  "unprovisioned",
+  "provisioning",
+  "ready",
+  "recovery_required",
+  "conflict",
+  "unavailable",
+]);
+
+// WP-007: stable business error codes for the personal balance surface.
+export const BALANCE_DATA_INVALID_CODE = "WALLET_DATOS_INVALIDOS";
+export const BALANCE_UNAVAILABLE_CODE = "BALANCE_NO_DISPONIBLE";
+export type WalletReadinessState = z.infer<typeof walletReadinessStateSchema>;
+
+export const currentWalletResponseSchema = z.object({
+  userId: z.string().uuid(),
+  state: walletReadinessStateSchema,
+  address: z.string(),
+  chainFamily: z.string(),
+  provider: z.string(),
+});
+export type CurrentWalletResponse = z.infer<typeof currentWalletResponseSchema>;
+
+export const walletSyncResponseSchema = z.object({
+  userId: z.string().uuid(),
+  state: walletReadinessStateSchema,
+  address: z.string(),
+  created: z.boolean(),
+});
+export type WalletSyncResponse = z.infer<typeof walletSyncResponseSchema>;
+
+/** PEW-013: permission lifecycle is separate from login and payment confirmation. */
+export const permissionStateSchema = z.enum([
+  "pending",
+  "active",
+  "revoking",
+  "revoked",
+  "unavailable",
+]);
+export type PermissionState = z.infer<typeof permissionStateSchema>;
+
+export const walletPermissionResponseSchema = z.object({
+  userId: z.string().uuid(),
+  state: permissionStateSchema,
+  perTransferUsdc: z.string(),
+  rollingTotalUsdc: z.string(),
+  rollingWindowSeconds: z.number().int(),
+  gasCeiling: z.string(),
+  recipients: z.array(z.string()),
+  aggregateOvershootCaveat: z.boolean(),
+  // PEW-014: rolling-window aggregation remains provider-unproven (parent gate)
+  // and is surfaced as a hard block on payments, never silently hidden.
+  aggregationReady: z.boolean().optional(),
+  aggregateBlockReason: z.string().optional(),
+});
+export type WalletPermissionResponse = z.infer<
+  typeof walletPermissionResponseSchema
+>;
+
+export const walletRevokeResponseSchema = z.object({
+  userId: z.string().uuid(),
+  state: permissionStateSchema,
+  remote: z.enum(["revoked", "unavailable"]),
+});
+export type WalletRevokeResponse = z.infer<typeof walletRevokeResponseSchema>;
+
+export const activateWalletPermissionInputSchema = z.object({
+  // Explicit recipient allowlist (PEW-007/Q3): the user authorizes exactly these.
+  recipients: z.array(z.string().trim().min(1)).min(1),
+});
+export type ActivateWalletPermissionInput = z.infer<
+  typeof activateWalletPermissionInputSchema
+>;
+
+/** PEW-014: signer enrollment prepare posts the explicit recipient allowlist. */
+export const enrollmentPrepareInputSchema = z.object({
+  recipients: z.array(z.string().trim().min(1)).min(1),
+});
+export type EnrollmentPrepareInput = z.infer<
+  typeof enrollmentPrepareInputSchema
+>;
+
+export const enrollmentPreparationResponseSchema = z.object({
+  walletId: z.string().uuid(),
+  walletAddress: z.string(),
+  policyId: z.string(),
+  quorumId: z.string(),
+  perTransferUsdc: z.string(),
+  rollingTotalUsdc: z.string(),
+  windowSeconds: z.number().int(),
+  aggregationReady: z.literal(false),
+  aggregateBlockReason: z.string(),
+});
+export type EnrollmentPreparationResponse = z.infer<
+  typeof enrollmentPreparationResponseSchema
+>;
+
+export const enrollmentCompleteInputSchema = z.object({
+  walletId: z.string().uuid(),
+});
+export type EnrollmentCompleteInput = z.infer<
+  typeof enrollmentCompleteInputSchema
+>;
+
+export const enrollmentCompleteResponseSchema = z.object({
+  verified: z.boolean(),
+  state: permissionStateSchema,
+  // Full permission summary only when read-back proof succeeded.
+  permission: walletPermissionResponseSchema.optional(),
+  // Observed read-back fields when proof could not be established (honest
+  // evidence, never a fabricated success flag).
+  observed: z
+    .object({
+      walletOwnerMatches: z.boolean(),
+      policyAttached: z.boolean(),
+      observedPolicyIds: z.array(z.string()),
+      observedSignerIds: z.array(z.string()),
+    })
+    .optional(),
+});
+export type EnrollmentCompleteResponse = z.infer<
+  typeof enrollmentCompleteResponseSchema
+>;
+
+// WP-004..WP-007: personal USDC balance surface. The catalog is closed on
+// the server (Arc testnet, USDC ERC-20 with six decimals); the client can
+// never select chain, token or owner.
+export const ARC_TESTNET_CHAIN_ID = 5042002;
+export const ARC_TESTNET_NETWORK_NAME = "Arc testnet";
+export const USDC_ARC_TESTNET_CONTRACT =
+  "0x3600000000000000000000000000000000000000";
+
+export const balanceAssetSchema = z.object({
+  tokenId: z.literal("5042002:0x3600000000000000000000000000000000000000"),
+  contract: z.literal("0x3600000000000000000000000000000000000000"),
+  symbol: z.literal("USDC"),
+  name: z.literal("USD Coin"),
+  decimals: z.literal(6),
+  balanceAtomic: z
+    .string()
+    .regex(/^(0|[1-9][0-9]*)$/, "canonical decimal uint256 string"),
+});
+export type BalanceAsset = z.infer<typeof balanceAssetSchema>;
+
+export const balancesReadyDataSchema = z.object({
+  walletState: z.literal("ready"),
+  address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  chainId: z.literal(5042002),
+  networkName: z.literal("Arc testnet"),
+  testnet: z.literal(true),
+  source: z.enum(["fixture", "rpc"]),
+  observedAt: z.string(),
+  assets: z.tuple([balanceAssetSchema]),
+});
+export type BalancesReadyData = z.infer<typeof balancesReadyDataSchema>;
+
+// Non-ready variants omit address/source and never report an amount
+// (WP-005): assets is empty and observedAt is null.
+export const balancesNotReadyDataSchema = z.object({
+  walletState: walletReadinessStateSchema.exclude(["ready"]),
+  chainId: z.literal(5042002),
+  networkName: z.literal("Arc testnet"),
+  testnet: z.literal(true),
+  observedAt: z.literal(null),
+  assets: z.tuple([]),
+});
+export type BalancesNotReadyData = z.infer<typeof balancesNotReadyDataSchema>;
+
+export const balancesDataSchema = z.discriminatedUnion("walletState", [
+  balancesReadyDataSchema,
+  balancesNotReadyDataSchema,
+]);
+export type BalancesData = z.infer<typeof balancesDataSchema>;

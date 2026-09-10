@@ -4,7 +4,7 @@
 
 ### Requirement: RAM-008 Per-Request Text Path Identity
 
-The text path MUST build the recipient-memory runtime per request using the resolved internal `userId` from the active identity provider, replacing the fixed `demoUserId`. The voice path MUST continue to scope via `binding.sub`. No path MAY use a fixed `demoUserId` as the identity source.
+The text path MUST build the recipient-memory runtime per request using the resolved internal `userId` from the active identity provider, replacing the fixed `demoUserId`. The voice path MUST continue to scope via `binding.sub`. In `privy` mode no path MAY use a fixed `demoUserId`; `demo` mode resolves the configured sentinel UUID.
 
 #### Scenario: text path scopes to resolved user
 
@@ -12,7 +12,7 @@ The text path MUST build the recipient-memory runtime per request using the reso
 - WHEN the text memory runtime is built
 - THEN it uses A's resolved UUID
 
-#### Scenario: voice path unchanged
+#### Scenario: voice identity comes from an authorized conversation
 
 - GIVEN a live voice session
 - WHEN memory tools scope

@@ -108,7 +108,7 @@ describe("telemetry data boundary", () => {
       { authorization: "Authorization: Bearer abcdef123456" },
     ],
     ["cookie header", { cookie: "Cookie: session=abcdef123456" }],
-    ["api key assignment", { config: "api_key = sk-liveabcdef123456" }],
+    ["api key assignment", { config: "api_key = sk-liveabcdef123456" }], // gitleaks:allow (synthetic redaction-test fixture, not a secret)
     ["bearer token", { header: "bearer abcdefgh1234" }],
     [
       "private key",

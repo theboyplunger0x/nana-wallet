@@ -29,7 +29,10 @@ import {
   type ContextBudget,
 } from "../conversations/context-renewal.js";
 import type { ConversationSnapshot } from "../conversations/types.js";
-import { getConfiguredRecipientMemoryRuntime } from "../memory/runtime.js";
+import {
+  getConfiguredRecipientMemoryRuntime,
+  getMemoryRuntimeForUser,
+} from "../memory/runtime.js";
 
 export type CoreDependencies = {
   wallet: WalletProvider;
@@ -52,25 +55,25 @@ export type WorkerDependencies = CoreDependencies & {
 export function createWalletProvider(
   environment: NodeJS.ProcessEnv = process.env,
 ): WalletProvider {
-      if (environment.WDK_TOOLS_SOURCE === "circle-arc") {
-        // D8 testnet-only boot guard (CAR-014): the health route derives
-        // `network` from WDK_NETWORK, so a set-but-mismatched network or token
-        // would advertise a contract the provider cannot serve. Fail closed at
-        // boot instead.
-        const network = environment.WDK_NETWORK;
-        if (network !== undefined && network !== ARC_TESTNET_NETWORK) {
-          throw new CircleArcConfigError(
-            `WDK_TOOLS_SOURCE=circle-arc requires WDK_NETWORK=${ARC_TESTNET_NETWORK}; got "${network}".`,
-          );
-        }
-        const token = environment.WDK_TOKEN;
-        if (token !== undefined && token !== "USDC") {
-          throw new CircleArcConfigError(
-            `WDK_TOOLS_SOURCE=circle-arc requires WDK_TOKEN=USDC; got "${token}".`,
-          );
-        }
-        return new CircleArcProvider(readCircleArcProviderConfig(environment));
-      }
+  if (environment.WDK_TOOLS_SOURCE === "circle-arc") {
+    // D8 testnet-only boot guard (CAR-014): the health route derives
+    // `network` from WDK_NETWORK, so a set-but-mismatched network or token
+    // would advertise a contract the provider cannot serve. Fail closed at
+    // boot instead.
+    const network = environment.WDK_NETWORK;
+    if (network !== undefined && network !== ARC_TESTNET_NETWORK) {
+      throw new CircleArcConfigError(
+        `WDK_TOOLS_SOURCE=circle-arc requires WDK_NETWORK=${ARC_TESTNET_NETWORK}; got "${network}".`,
+      );
+    }
+    const token = environment.WDK_TOKEN;
+    if (token !== undefined && token !== "USDC") {
+      throw new CircleArcConfigError(
+        `WDK_TOOLS_SOURCE=circle-arc requires WDK_TOKEN=USDC; got "${token}".`,
+      );
+    }
+    return new CircleArcProvider(readCircleArcProviderConfig(environment));
+  }
   if (environment.WDK_TOOLS_SOURCE === "live") {
     return new WdkWalletProvider(getWdkTools, closeWdkClient);
   }
@@ -86,7 +89,9 @@ export function createCoreDependencies(
     environment.WDK_TOOLS_SOURCE === "circle-arc"
       ? wallet
       : new WdkWalletProvider(async () => legacyToolSource());
-  const maxInputTokens = Number(environment.CONVERSATION_MAX_INPUT_TOKENS ?? 4096);
+  const maxInputTokens = Number(
+    environment.CONVERSATION_MAX_INPUT_TOKENS ?? 4096,
+  );
   if (!Number.isFinite(maxInputTokens) || maxInputTokens <= 0)
     throw new Error("CONVERSATION_MAX_INPUT_TOKENS must be positive.");
   return {
@@ -96,7 +101,8 @@ export function createCoreDependencies(
       budget: { maxInputTokens, renewAtRatio: 0.8 },
       estimateTokens(snapshot) {
         return snapshot.messages.reduce((total, message) => {
-          const content = typeof message.content === "string" ? message.content : "";
+          const content =
+            typeof message.content === "string" ? message.content : "";
           return total + Math.ceil(content.length / 4);
         }, 0);
       },
@@ -128,6 +134,9 @@ export function createWorkerDependencies(
     financialTasks,
     contextRenewal: core.contextRenewal,
     ...(memory ? { memory } : {}),
+    // PMU-014: claimed-recipient revalidation resolves the runtime for the
+    // conversation's actual user instead of the fixed demo tenant.
+    memoryForUser: (userId) => getMemoryRuntimeForUser(userId, environment),
   });
   return {
     ...core,
@@ -157,6 +166,10 @@ async function legacyToolSource(): Promise<Record<string, Tool>> {
       name,
       {
         execute: (input: unknown) => callWdkTool(name, input),
+        // SAFETY: the legacy WDK tool surface intentionally satisfies the
+        // AI SDK Tool shape through duck typing — the SDK's generic tool
+        // type requires execute/parameters fields this minimal wrapper
+        // provides at runtime; the cast documents that contract.
       } as unknown as Tool,
     ]),
   );

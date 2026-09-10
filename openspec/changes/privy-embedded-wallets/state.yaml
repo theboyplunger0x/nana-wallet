@@ -1,0 +1,80 @@
+schema: sdd-state/v1
+change: privy-embedded-wallets
+artifact_store: openspec
+updated_at: 2026-09-08
+revision: 2026-09-08-r3
+depends_on:
+  - privy-multi-user-foundation
+phases:
+  init: completed
+  explore: completed
+  propose: completed
+  spec: completed
+  design: completed
+  tasks: completed
+  apply: completed
+  verify: in_progress
+  archive: not_started
+product_decisions: approved
+outline: consolidated_r3
+implementation_authorized: true
+authorization_note: >-
+  user explicitly authorized implementation on 2026-09-08
+  ("begin development"); supersedes the earlier
+  implementation_authorized false gate
+next_recommended: verify_live_enrollment
+open_decisions:
+  - Q2_fee_accounting
+verification_gaps:
+  - privy_credentials_and_existing_phone_channel
+  - sdk_policy_arc_live_capabilities
+independent_review: historical_r2_only_never_invent_evidence
+spec_review: resolved_by_r3_consolidation
+question_inventory: >-
+  .agent-workflow/tasks/privy-embedded-wallets/06-spec-review-open-questions.md
+resolved_review_decisions:
+  - Q1_privy_only_native_policy_enforcement
+  - Q2_indefinite_permission_10_usdc_per_transfer_50_usdc_per_hour
+  - Q3_preserve_current_recipient_rules
+  - Q4_preview_bound_voice_or_button_confirmation
+  - Q5_preserve_current_r2_behavior
+followups:
+  - frontend_backend_permission_recipient_management
+permission_constraints:
+  expires_at: null
+  user_revocable: true
+  per_transfer_usdc: "10"
+  rolling_transfer_total_usdc: "50"
+  window_seconds: 3600
+  window_type: rolling
+  window_type_status: accepted_native_privy_window
+  fee_accounting: unresolved
+  enforcement_trust_boundary: privy_native_policies_only
+  application_spending_cap: false
+  concurrent_aggregate_overshoot_limitation: accepted
+provider_constraints:
+  native_minimum_aggregation_window_seconds: 3600
+  aggregate_updates_are_not_atomic_with_concurrent_signing: true
+enrollment_slice:
+  date: 2026-09-09
+  scope: >-
+    real owner-verified sync + user-authenticated
+    addSigners enrollment with policy readback
+    real owner-verified sync + user-authenticated
+    addSigners enrollment with policy readback
+  live_read_only_smoke: >-
+    GET /v1/wallets 200 with 0 wallets (PASS);
+    ?limit= 500 response recorded
+    GET /v1/wallets 200 with 0 wallets (PASS);
+    ?limit= 500 response recorded
+  rolling_window_enforcement: BLOCKED_pending_wallet_identity_group_by_proof
+  external_config_request: >-
+    parent to confirm wallet-identity group_by scope
+    or per-wallet aggregation quota with Privy
+    parent to confirm wallet-identity group_by scope
+    or per-wallet aggregation quota with Privy
+  prior_completion_correction: >-
+    earlier verify-completed claim was fixture-only;
+    live verification remains open
+    earlier verify-completed claim was fixture-only;
+    live verification remains open

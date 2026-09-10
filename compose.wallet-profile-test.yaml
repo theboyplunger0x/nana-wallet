@@ -1,0 +1,26 @@
+# Isolated test database for the wallet-profile implementation worktree.
+# Own compose project name, volume and host port so it never touches the
+# nana-privy-impl stack or the default 5432 database.
+name: nana-wallet-profile-test
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.1-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wdk_agent
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - wallet_profile_postgres:/var/lib/postgresql/data
+      - ./docker/init/001-recipient-app.sql:/docker-entrypoint-initdb.d/001-recipient-app.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wdk_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  wallet_profile_postgres:

@@ -11,10 +11,10 @@ import type {
   CreateAgendaEventInput,
   CreateContactInput,
   CreateConversationResponse,
+  CurrentWalletResponse,
   EndLiveConversationResponse,
-  EmptyResponse,
   ErrCode,
-  Me,
+  MeResponse,
   MovementsPage,
   PaymentIntent,
   PaymentResult,
@@ -25,8 +25,19 @@ import type {
   TransferIntentInput,
   UpdateContactInput,
   VoiceRoomTokenResponse,
+  ActivateWalletPermissionInput,
+  WalletActivationResponse,
+  WalletPermissionResponse,
+  WalletRevokeResponse,
   WalletSummary,
+  WalletSyncResponse,
+  BalancesData,
+  EnrollmentCompleteInput,
+  EnrollmentCompleteResponse,
+  EnrollmentPrepareInput,
+  EnrollmentPreparationResponse,
 } from "./api-types";
+import { beginRequest, finishRequest, isSessionCurrent } from "./session-isolation";
 
 export const FALLBACK_ERROR_MESSAGE = "Algo no salió bien. Probá de nuevo en un ratito.";
 const TOKEN_STORAGE_KEY = "nana-wallet-token";
@@ -46,7 +57,51 @@ export function isAmbiguousError(error: unknown): boolean {
   return !(error instanceof ApiError) || error.ambiguous;
 }
 
-let configuredToken: string | null = null;
+const TOKEN_STORAGE_KEY_DEMO = TOKEN_STORAGE_KEY;
+
+/**
+ * Injectable source of the Authorization bearer token.
+ *
+ * In Privy mode the app injects a source backed by `usePrivy().getAccessToken()`
+ * (which refreshes the session automatically when it is about to expire). The
+ * module stays testable: tests inject a fake source with fake fetch.
+ */
+export type ApiTokenSource = {
+  getToken: () => Promise<string | null>;
+  /** Optional hook called on a 401 so the source can drop a stale cached token. */
+  invalidate?: () => void | Promise<void>;
+};
+
+let tokenSource: ApiTokenSource | null = null;
+let legacyConfiguredToken: string | null = null;
+
+/** Sets (or clears) the bearer token source used by every API request. */
+export function setApiTokenSource(source: ApiTokenSource | null) {
+  tokenSource = source;
+}
+
+/**
+ * Backwards-compatible static token setter. Prefer `setApiTokenSource` for the
+ * Privy flow; this remains useful for tests and the demo path.
+ */
+export function setApiToken(token: string | null) {
+  legacyConfiguredToken = token;
+}
+
+function identityProviderMode(): "demo" | "privy" | undefined {
+  return import.meta.env["VITE_IDENTITY_PROVIDER"] as "demo" | "privy" | undefined;
+}
+
+/** true only in the user-authenticated Privy flow (demo is always false). */
+export function isPrivyIdentityProvider(): boolean {
+  return identityProviderMode() === "privy";
+}
+
+function usesDemoToken(): boolean {
+  // The backend defaults IDENTITY_PROVIDER to "demo" when unset; mirror that so
+  // local dev works without a token source. Only "privy" is fail-closed.
+  return identityProviderMode() !== "privy";
+}
 
 export class ApiError extends Error {
   readonly code: ErrCode;
@@ -73,10 +128,6 @@ export class ApiError extends Error {
   }
 }
 
-export function setApiToken(token: string | null) {
-  configuredToken = token;
-}
-
 export function createIdempotencyKey() {
   return crypto.randomUUID();
 }
@@ -85,13 +136,31 @@ function getApiBaseUrl() {
   return (import.meta.env["VITE_API_URL"] || "http://localhost:3000").replace(/\/$/, "");
 }
 
-function getApiToken() {
-  if (configuredToken) return configuredToken;
-  if (typeof window !== "undefined") {
-    const storedToken = window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
-    if (storedToken) return storedToken;
+function isUnauthorized(status: number | undefined): boolean {
+  return status === 401;
+}
+
+/**
+ * Resolves the bearer token to attach to a request.
+ *
+ * Privy mode fails closed: without an injected source (i.e. not authenticated)
+ * it returns null and requests are rejected before they leave the browser.
+ * The demo fallback lives entirely inside the `demo` branch so the
+ * `"token-de-desarrollo"` value and the `sessionStorage` token are never used
+ * in Privy mode.
+ */
+async function getFreshToken(): Promise<string | null> {
+  if (tokenSource) return tokenSource.getToken();
+  if (legacyConfiguredToken) return legacyConfiguredToken;
+  if (usesDemoToken()) {
+    if (typeof window !== "undefined") {
+      const storedToken = window.sessionStorage.getItem(TOKEN_STORAGE_KEY_DEMO);
+      if (storedToken) return storedToken;
+    }
+    return import.meta.env.DEV ? "token-de-desarrollo" : "";
   }
-  return import.meta.env.DEV ? "token-de-desarrollo" : "";
+  // Privy (or unset identity provider) without an injected source: fail closed.
+  return null;
 }
 
 function makeUrl(path: string, params?: URLSearchParams) {
@@ -99,47 +168,118 @@ function makeUrl(path: string, params?: URLSearchParams) {
   return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
 }
 
-async function request<T>(
+/**
+ * Fetches a URL with the Authorization bearer header and the session-isolation
+ * guard. On a 401 it invalidates the source, fetches a fresh token and retries
+ * exactly once; a second 401 is surfaced without another retry.
+ */
+async function authedFetch(
   path: string,
   options: RequestInit = {},
   idempotencyKey?: string,
-): Promise<T> {
-  const headers = new Headers(options.headers);
-  headers.set("Authorization", `Bearer ${getApiToken()}`);
-  headers.set("Content-Type", "application/json");
-  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+): Promise<Response> {
+  const guard = beginRequest();
 
-  let response: Response;
-  try {
-    response = await fetch(makeUrl(path), { ...options, headers });
-  } catch {
-    // Nunca hubo respuesta. La petición pudo haber llegado igual.
-    throw new ApiError("SERVICIO_CAIDO", FALLBACK_ERROR_MESSAGE, { ambiguous: true });
+  const exec = async (token: string): Promise<Response> => {
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+    let response: Response;
+    try {
+      response = await fetch(makeUrl(path), { ...options, headers, signal: guard.signal });
+    } catch {
+      // A session reset aborts the request; treat that as a failed auth, not a
+      // plain network error, so the caller discards the stale result.
+      if (guard.controller.signal.aborted) {
+        throw new ApiError("NO_AUTORIZADO", FALLBACK_ERROR_MESSAGE, { status: 401 });
+      }
+      throw new ApiError("SERVICIO_CAIDO", FALLBACK_ERROR_MESSAGE, { ambiguous: true });
+    }
+    return response;
+  };
+
+  const token = await getFreshToken();
+  if (!token) {
+    finishRequest(guard.controller);
+    throw new ApiError("NO_AUTORIZADO", FALLBACK_ERROR_MESSAGE, { status: 401 });
   }
 
-  let envelope: ApiEnvelope<T>;
   try {
-    envelope = (await response.json()) as ApiEnvelope<T>;
+    const first = await exec(token);
+    if (!isSessionCurrent(guard.generation)) {
+      throw new ApiError("NO_AUTORIZADO", FALLBACK_ERROR_MESSAGE, { status: 401 });
+    }
+    if (isUnauthorized(first.status)) {
+      await tokenSource?.invalidate?.();
+      const fresh = await getFreshToken();
+      if (fresh) {
+        const retried = await exec(fresh);
+        if (!isSessionCurrent(guard.generation)) {
+          throw new ApiError("NO_AUTORIZADO", FALLBACK_ERROR_MESSAGE, { status: 401 });
+        }
+        return retried;
+      }
+    }
+    return first;
+  } finally {
+    finishRequest(guard.controller);
+  }
+}
+
+/** Parses a wallet-envelope response into `T`, handling both envelope shapes. */
+async function parseEnvelope<T>(response: Response): Promise<T> {
+  let body: unknown;
+  try {
+    body = await response.json();
   } catch {
-    // El servidor contestó algo que no podemos leer. No sabemos qué hizo antes de contestar.
     throw new ApiError("ERROR_INTERNO", FALLBACK_ERROR_MESSAGE, {
       status: response.status,
       ambiguous: true,
     });
   }
 
-  if (envelope.ok) return envelope.data;
+  const envelope = body as ApiEnvelope<T> & { status?: unknown };
+  if (envelope.ok === true) return envelope.data;
 
-  throw new ApiError(envelope.error.code, envelope.error.message || FALLBACK_ERROR_MESSAGE, {
-    ...(envelope.error.field ? { field: envelope.error.field } : {}),
+  // Business error envelope: { ok:false, error:{ code, message, field? } }
+  if (envelope.ok === false && envelope.error) {
+    const code = isUnauthorized(response.status) ? "NO_AUTORIZADO" : envelope.error.code;
+    throw new ApiError(code, envelope.error.message || FALLBACK_ERROR_MESSAGE, {
+      ...(envelope.error.field ? { field: envelope.error.field } : {}),
+      status: response.status,
+      ambiguous:
+        response.status >= 500 ||
+        envelope.error.code === "SERVICIO_CAIDO" ||
+        envelope.error.code === "ERROR_INTERNO",
+    });
+  }
+
+  // Identity/conversation-style error: { status:'error', message, code }
+  const statusError = body as { status?: unknown; message?: unknown; code?: unknown };
+  if (statusError && statusError.status === "error") {
+    throw new ApiError(
+      isUnauthorized(response.status)
+        ? "NO_AUTORIZADO"
+        : ((typeof statusError.code === "string" ? statusError.code : "ERROR_INTERNO") as ErrCode),
+      typeof statusError.message === "string" ? statusError.message : FALLBACK_ERROR_MESSAGE,
+      { status: response.status, ambiguous: response.status >= 500 },
+    );
+  }
+
+  throw new ApiError("ERROR_INTERNO", FALLBACK_ERROR_MESSAGE, {
     status: response.status,
-    // Un 5xx significa que el servidor falló, posiblemente después de haber ejecutado.
-    // Un 4xx es un rechazo explícito: la plata no se movió.
-    ambiguous:
-      response.status >= 500 ||
-      envelope.error.code === "SERVICIO_CAIDO" ||
-      envelope.error.code === "ERROR_INTERNO",
+    ambiguous: response.status >= 500,
   });
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  idempotencyKey?: string,
+): Promise<T> {
+  const response = await authedFetch(path, options, idempotencyKey);
+  return parseEnvelope<T>(response);
 }
 
 /** Conversation endpoints return raw JSON instead of the wallet API envelope. */
@@ -148,16 +288,7 @@ async function rawConversationRequest<T>(
   options: RequestInit,
   acceptErrorResponse = false,
 ): Promise<T> {
-  const headers = new Headers(options.headers);
-  headers.set("Authorization", `Bearer ${getApiToken()}`);
-  headers.set("Content-Type", "application/json");
-
-  let response: Response;
-  try {
-    response = await fetch(makeUrl(path), { ...options, headers });
-  } catch {
-    throw new ApiError("SERVICIO_CAIDO", FALLBACK_ERROR_MESSAGE, { ambiguous: true });
-  }
+  const response = await authedFetch(path, options);
 
   let body: unknown;
   try {
@@ -180,7 +311,11 @@ async function rawConversationRequest<T>(
       return body as T;
     }
     throw new ApiError(
-      response.status >= 500 ? "ERROR_INTERNO" : "DATOS_INVALIDOS",
+      isUnauthorized(response.status)
+        ? "NO_AUTORIZADO"
+        : response.status >= 500
+          ? "ERROR_INTERNO"
+          : "DATOS_INVALIDOS",
       typeof errorBody.message === "string" ? errorBody.message : FALLBACK_ERROR_MESSAGE,
       { status: response.status, ambiguous: response.status >= 500 },
     );
@@ -206,6 +341,46 @@ export const api = {
     return request<MovementsPage>(`/v1/wallet/movements?${search.toString()}`);
   },
 
+  // PEW-005/007/013: wallet lifecycle + permission surface. Readiness is
+  // separate from permission readiness; these call the authenticated,
+  // user-scoped /v1/wallets endpoints.
+  getCurrentWallet: () => request<CurrentWalletResponse>("/v1/wallets/current"),
+
+  // WP-003/WP-004: personal USDC balance. No parameters are accepted by the
+  // contract; the server resolves owner, chain and token itself.
+  getBalances: () => request<BalancesData>("/v1/wallets/current/balances"),
+
+  syncWallet: () => request<WalletSyncResponse>("/v1/wallets/sync", jsonRequest("POST", {})),
+
+  getCurrentWalletPermission: () =>
+    request<WalletPermissionResponse>("/v1/wallets/current/permission"),
+
+  revokeWalletPermission: () =>
+    request<WalletRevokeResponse>("/v1/wallets/current/permission/revoke", jsonRequest("POST", {})),
+
+  // PEW-013: explicit activation request. The SERVER reads back the effective
+  // provider policy before marking active; the client cannot assert enrollment
+  // succeeded (a failed read-back surfaces as an error, never as "active").
+  activateWalletPermission: (input: ActivateWalletPermissionInput) =>
+    request<WalletActivationResponse>("/v1/wallets/current/permission", jsonRequest("POST", input)),
+
+  // PEW-014: user-authenticated signer enrollment. `prepare` creates/reuses the
+  // provider policy and returns the wallet/policy/quorum ids; the browser then
+  // adds the signer, and `complete` asks the SERVER to re-prove owner + policy
+  // attachment. A `verified:false` result must be surfaced honestly, never as
+  // an active grant.
+  prepareWalletPermission: (input: EnrollmentPrepareInput) =>
+    request<EnrollmentPreparationResponse>(
+      "/v1/wallets/current/permission/prepare",
+      jsonRequest("POST", input),
+    ),
+
+  completeWalletPermission: (input: EnrollmentCompleteInput) =>
+    request<EnrollmentCompleteResponse>(
+      "/v1/wallets/current/permission/complete",
+      jsonRequest("POST", input),
+    ),
+
   getContacts: () => request<Contact[]>("/v1/contacts"),
 
   createContact: (input: CreateContactInput) =>
@@ -215,7 +390,7 @@ export const api = {
     request<Contact>(`/v1/contacts/${contactId}`, jsonRequest("PATCH", input)),
 
   deleteContact: (contactId: string) =>
-    request<EmptyResponse>(`/v1/contacts/${contactId}`, jsonRequest("DELETE")),
+    request<Contact>(`/v1/contacts/${contactId}`, jsonRequest("DELETE")),
 
   revealContactCbu: (contactId: string) =>
     request<RevealedCbu>(`/v1/contacts/${contactId}/reveal-cbu`, jsonRequest("POST", {})),
@@ -297,25 +472,18 @@ export const api = {
     etag?: string,
   ): Promise<ConversationState | null> => {
     const headers = new Headers();
-    headers.set("Authorization", `Bearer ${getApiToken()}`);
-    headers.set("Content-Type", "application/json");
     if (etag) headers.set("If-None-Match", etag);
-
-    let response: Response;
-    try {
-      response = await fetch(
-        makeUrl(`/v1/conversations/${encodeURIComponent(conversationId)}/state`),
-        { method: "GET", headers },
-      );
-    } catch {
-      throw new ApiError("SERVICIO_CAIDO", FALLBACK_ERROR_MESSAGE, { ambiguous: true });
-    }
+    const response = await authedFetch(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/state`,
+      { method: "GET", headers },
+    );
     if (response.status === 304) return null;
     if (!response.ok) {
-      throw new ApiError("DATOS_INVALIDOS", FALLBACK_ERROR_MESSAGE, {
-        status: response.status,
-        ambiguous: response.status >= 500,
-      });
+      throw new ApiError(
+        isUnauthorized(response.status) ? "NO_AUTORIZADO" : "DATOS_INVALIDOS",
+        FALLBACK_ERROR_MESSAGE,
+        { status: response.status, ambiguous: response.status >= 500 },
+      );
     }
     return (await response.json()) as ConversationState;
   },
@@ -339,26 +507,16 @@ export const api = {
       }),
     ),
 
-  getMe: () => request<Me>("/v1/me"),
+  getMe: () => request<MeResponse>("/v1/me"),
 
   speak: (text: string) => speak(text),
 };
 
 async function speak(text: string): Promise<Blob> {
-  const headers = new Headers();
-  headers.set("Authorization", `Bearer ${getApiToken()}`);
-  headers.set("Content-Type", "application/json");
-
-  let response: Response;
-  try {
-    response = await fetch(makeUrl("/v1/voice/speak"), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ text }),
-    });
-  } catch {
-    throw new ApiError("SERVICIO_CAIDO", FALLBACK_ERROR_MESSAGE, { ambiguous: true });
-  }
+  const response = await authedFetch("/v1/voice/speak", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
 
   if (!response.ok) {
     throw new ApiError("ERROR_INTERNO", "No pudimos generar el audio.", {
@@ -422,9 +580,15 @@ export function confirmMoneyIntent(
 
 export const queryKeys = {
   me: ["me"] as const,
-  wallet: ["wallet", "summary"] as const,
-  movements: ["wallet", "movements"] as const,
-  contacts: ["contacts"] as const,
-  agenda: (from: string, to: string) => ["agenda", from, to] as const,
-  bills: ["bills"] as const,
+  // WP-013: personal balances cache is user-scoped with its own "balances"
+  // root, distinct from the legacy wallet summary keys.
+  balances: (userId: string | undefined, chainId: number) => ["balances", userId, chainId] as const,
+  wallet: (userId: string | undefined) => ["wallet", "summary", userId] as const,
+  movements: (userId: string | undefined) => ["wallet", "movements", userId] as const,
+  currentWallet: (userId: string | undefined) => ["wallet", "current", userId] as const,
+  walletPermission: (userId: string | undefined) => ["wallet", "permission", userId] as const,
+  contacts: (userId: string | undefined) => ["contacts", userId] as const,
+  agenda: (userId: string | undefined, from: string, to: string) =>
+    ["agenda", userId, from, to] as const,
+  bills: (userId: string | undefined) => ["bills", userId] as const,
 };

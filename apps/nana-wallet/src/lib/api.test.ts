@@ -1,5 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, createConversationTurnSender, setApiToken } from "@/lib/api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  api,
+  createConversationTurnSender,
+  queryKeys,
+  setApiToken,
+  setApiTokenSource,
+} from "@/lib/api";
 import {
   runExclusiveConversationAction,
   shouldLockAfterConversationResolution,
@@ -12,9 +18,20 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+beforeEach(() => {
+  // The API module only uses the demo fallback when VITE_IDENTITY_PROVIDER=demo.
+  // All existing tests exercise the request plumbing; run them in demo mode.
+  vi.stubEnv("VITE_IDENTITY_PROVIDER", "demo");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  setApiTokenSource(null);
   setApiToken(null);
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem("nana-wallet-token");
+  }
 });
 
 describe("conversation API", () => {
@@ -132,6 +149,314 @@ describe("voice room token API", () => {
 
     await expect(api.fetchVoiceRoomToken("conv-1")).rejects.toThrow(
       "LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are required.",
+    );
+  });
+});
+
+describe("bearer token plumbing (PMU-016/017)", () => {
+  it("sends Authorization: Bearer on every request", async () => {
+    setApiTokenSource({ getToken: async () => "token-a" });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true, data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getContacts();
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer token-a");
+  });
+
+  it("refreshes the token and retries once after a 401", async () => {
+    let token = "stale";
+    const invalidate = vi.fn(async () => {
+      token = "fresh";
+    });
+    setApiTokenSource({ getToken: async () => token, invalidate });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: { code: "NO_AUTORIZADO", message: "unauth" } }, 401),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getContacts();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    const [, init2] = fetchMock.mock.calls[1] ?? [];
+    expect(new Headers(init2?.headers).get("Authorization")).toBe("Bearer fresh");
+  });
+
+  it("does not retry a second 401", async () => {
+    const invalidate = vi.fn(async () => undefined);
+    setApiTokenSource({ getToken: async () => "stale", invalidate });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ ok: false, error: { code: "NO_AUTORIZADO", message: "unauth" } }, 401),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getContacts()).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the demo token only when VITE_IDENTITY_PROVIDER=demo", async () => {
+    vi.stubEnv("VITE_IDENTITY_PROVIDER", "demo");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true, data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getContacts();
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer token-de-desarrollo");
+  });
+
+  it("uses the sessionStorage token in demo mode when no source is set", async () => {
+    vi.stubEnv("VITE_IDENTITY_PROVIDER", "demo");
+    window.sessionStorage.setItem("nana-wallet-token", "stored-token");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true, data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getContacts();
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer stored-token");
+  });
+
+  it("fails closed in privy mode without a token source and ignores sessionStorage", async () => {
+    vi.stubEnv("VITE_IDENTITY_PROVIDER", "privy");
+    window.sessionStorage.setItem("nana-wallet-token", "stored-token");
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getContacts()).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("wallet lifecycle API", () => {
+  const user = "22222222-2222-4222-8222-222222222222";
+  const currentWallet = {
+    userId: user,
+    state: "ready" as const,
+    address: "0x4b1f8c9e2d7a3f5b6c0d4e1f2a3b4c5d6e7f8a9b",
+    chainFamily: "arc",
+    provider: "privy",
+  };
+  const activeGrant = {
+    userId: user,
+    state: "active" as const,
+    perTransferUsdc: "10",
+    rollingTotalUsdc: "50",
+    rollingWindowSeconds: 3600,
+    gasCeiling: "0.0002 ETH",
+    recipients: [
+      "0x1111111111111111111111111111111111111111",
+      "0x2222222222222222222222222222222222222222",
+    ],
+    aggregateOvershootCaveat: true,
+  };
+
+  it("reads the current wallet readiness from GET /v1/wallets/current", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ ok: true, data: currentWallet }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getCurrentWallet()).resolves.toEqual(currentWallet);
+
+    const [input] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input).endsWith("/v1/wallets/current")).toBe(true);
+  });
+
+  it("syncs the wallet with POST /v1/wallets/sync and returns readiness", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: {
+          userId: user,
+          state: "ready" as const,
+          address: currentWallet.address,
+          created: true,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.syncWallet()).resolves.toEqual({
+      userId: user,
+      state: "ready",
+      address: currentWallet.address,
+      created: true,
+    });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input).endsWith("/v1/wallets/sync")).toBe(true);
+    expect(init?.method).toBe("POST");
+  });
+
+  it("reads the active payment permission from GET /v1/wallets/current/permission", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ ok: true, data: activeGrant }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getCurrentWalletPermission()).resolves.toEqual(activeGrant);
+
+    const [input] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input).endsWith("/v1/wallets/current/permission")).toBe(true);
+  });
+
+  it("revokes the permission and reports the remote outcome", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: { userId: user, state: "revoked" as const, remote: "revoked" as const },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.revokeWalletPermission()).resolves.toMatchObject({
+      state: "revoked",
+      remote: "revoked",
+    });
+
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input).endsWith("/v1/wallets/current/permission/revoke")).toBe(true);
+    expect(init?.method).toBe("POST");
+  });
+
+  it("keeps a revoke that reports provider-unavailable as ambiguous", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse(
+          { ok: false, error: { code: "WALLET_NO_DISPONIBLE", message: "Privy revoke failed." } },
+          503,
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.revokeWalletPermission()).rejects.toMatchObject({
+      code: "WALLET_NO_DISPONIBLE",
+      ambiguous: true,
+      status: 503,
+    });
+  });
+
+  it("reuses the 401 retry pipeline for the wallet endpoints", async () => {
+    let token = "stale";
+    const invalidate = vi.fn(async () => {
+      token = "fresh";
+    });
+    setApiTokenSource({ getToken: async () => token, invalidate });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false, error: { code: "NO_AUTORIZADO", message: "unauth" } }, 401),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: activeGrant }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getCurrentWalletPermission()).resolves.toEqual(activeGrant);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("wallet permission activation API (PEW-013)", () => {
+  it("activateWalletPermission posts the explicit recipient allowlist", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: {
+          userId: "22222222-2222-4222-8222-222222222222",
+          state: "active" as const,
+          perTransferUsdc: "10",
+          rollingTotalUsdc: "50",
+          rollingWindowSeconds: 3600,
+          gasCeiling: "0.0002 ETH",
+          recipients: ["0x1111111111111111111111111111111111111111"],
+          aggregateOvershootCaveat: true,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.activateWalletPermission({
+      recipients: ["0x1111111111111111111111111111111111111111"],
+    });
+    expect(result.state).toBe("active");
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(init?.method).toBe("POST");
+    expect(String(init?.body)).toContain("0x1111111111111111111111111111111111111111");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("personal balances API (WP-003/WP-004/WP-013)", () => {
+  it("queries the fixed balances route with no parameters and parses the ready envelope", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: {
+          walletState: "ready",
+          address: "0x1111111111111111111111111111111111111111",
+          chainId: 5042002,
+          networkName: "Arc testnet",
+          testnet: true,
+          source: "fixture",
+          observedAt: "2026-09-09T12:00:00.000Z",
+          assets: [
+            {
+              tokenId: "5042002:0x3600000000000000000000000000000000000000",
+              contract: "0x3600000000000000000000000000000000000000",
+              symbol: "USDC",
+              name: "USD Coin",
+              decimals: 6,
+              balanceAtomic: "1250000",
+            },
+          ],
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.getBalances();
+    expect(result.walletState).toBe("ready");
+    if (result.walletState === "ready") {
+      expect(result.assets[0]?.balanceAtomic).toBe("1250000");
+      expect(result.source).toBe("fixture");
+    }
+    const [url] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/v1/wallets/current/balances");
+    expect(String(url)).not.toContain("?");
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces the stable business error codes (WP-007)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse(
+          {
+            ok: false,
+            error: { code: "BALANCE_NO_DISPONIBLE", message: "No pudimos consultar el saldo." },
+          },
+          503,
+        ),
+      ),
+    );
+    await expect(api.getBalances()).rejects.toMatchObject({
+      code: "BALANCE_NO_DISPONIBLE",
+      status: 503,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("scopes the balances cache key per user and chain (WP-013)", () => {
+    expect(queryKeys.balances("user-a", 5042002)).toEqual(["balances", "user-a", 5042002]);
+    expect(queryKeys.balances("user-b", 5042002)).not.toEqual(
+      queryKeys.balances("user-a", 5042002),
     );
   });
 });

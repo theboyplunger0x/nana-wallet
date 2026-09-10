@@ -1,6 +1,9 @@
-import type { ModelMessage } from 'ai';
-import type { PendingTransfer, ConversationTurnResult } from '../../../src/contracts/http.js';
-import type { RecipientSelection } from '../../../src/conversations/types.js';
+import type { ModelMessage } from "ai";
+import type {
+  PendingTransfer,
+  ConversationTurnResult,
+} from "../../../src/contracts/http.js";
+import type { RecipientSelection } from "../../../src/conversations/types.js";
 
 /**
  * One model response step for a `MockLanguageModelV3` `doGenerate` sequence.
@@ -11,9 +14,20 @@ import type { RecipientSelection } from '../../../src/conversations/types.js';
  */
 export type ModelStep = {
   content: Array<
-    | { type: 'tool-call'; toolCallId: string; toolName: string; input: string }
-    | { type: 'text'; text: string }
+    | { type: "tool-call"; toolCallId: string; toolName: string; input: string }
+    | { type: "text"; text: string }
   >;
+  finishReason: { unified: "tool-calls" | "stop"; raw: unknown };
+  usage: {
+    inputTokens: {
+      total: number;
+      noCache: number;
+      cacheRead: number;
+      cacheWrite: number;
+    };
+    outputTokens: { total: number; text: number; reasoning: number };
+  };
+  warnings: unknown[];
 };
 
 /**
@@ -27,16 +41,16 @@ const modelUsage = {
 
 export function modelStep(
   content: Array<
-    | { type: 'tool-call'; toolCallId: string; toolName: string; input: string }
-    | { type: 'text'; text: string }
+    | { type: "tool-call"; toolCallId: string; toolName: string; input: string }
+    | { type: "text"; text: string }
   >,
 ): ModelStep {
   return {
     content,
     finishReason: {
-      unified: content.some((part) => part.type === 'tool-call')
-        ? ('tool-calls' as const)
-        : ('stop' as const),
+      unified: content.some((part) => part.type === "tool-call")
+        ? ("tool-calls" as const)
+        : ("stop" as const),
       raw: undefined,
     },
     usage: modelUsage,
@@ -47,7 +61,7 @@ export function modelStep(
 export type AgentTurn = {
   userText: string;
   modelSteps?: ModelStep[];
-  language?: 'es' | 'en';
+  language?: "es" | "en";
 };
 
 /**

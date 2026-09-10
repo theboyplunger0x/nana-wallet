@@ -1,9 +1,15 @@
-import { AccessToken, RoomConfiguration, type TokenVerifier } from 'livekit-server-sdk';
-import type { LiveKitTokenIssuerConfig } from '../config/livekit.js';
+import {
+  AccessToken,
+  RoomConfiguration,
+  type TokenVerifier,
+} from "livekit-server-sdk";
+import type { LiveKitTokenIssuerConfig } from "../config/livekit.js";
 
 export type RoomTokenInput = {
   conversationId: string;
   agentName?: string;
+  /** Server-resolved participant identity (PMU-020); falls back to config.identity in demo mode. */
+  identity?: string;
 };
 
 export type RoomTokenResult = {
@@ -27,7 +33,7 @@ export async function issueRoomToken(
   input: RoomTokenInput,
 ): Promise<RoomTokenResult> {
   if (!config.identity) {
-    throw new Error('DEMO_USER_ID is required to issue LiveKit room tokens.');
+    throw new Error("DEMO_USER_ID is required to issue LiveKit room tokens.");
   }
 
   const roomName = `nani-${input.conversationId}`;

@@ -10,18 +10,24 @@
  * no baseline for the outgoing pipeline).
  */
 
-import { Agent, setGlobalDispatcher } from 'undici';
+import { Agent, setGlobalDispatcher } from "undici";
 
 // Node's fetch negotiates HTTP/2; sharing h2 sessions across vitest worker
 // threads dies with ERR_HTTP2_INVALID_SESSION / bad record mac. Force HTTP/1.1.
 let dispatcherInstalled = false;
 function forceHttp1(): void {
   if (dispatcherInstalled) return;
-  setGlobalDispatcher(new Agent({ allowH2: false, keepAliveTimeout: 100, keepAliveMaxTimeout: 1000 }));
+  setGlobalDispatcher(
+    new Agent({
+      allowH2: false,
+      keepAliveTimeout: 100,
+      keepAliveMaxTimeout: 1000,
+    }),
+  );
   dispatcherInstalled = true;
 }
 
-export type SttProviderId = 'openai-transcribe' | 'openai-mini-transcribe';
+export type SttProviderId = "openai-transcribe" | "openai-mini-transcribe";
 
 export type SttProvider = {
   id: SttProviderId;
@@ -32,19 +38,19 @@ export type SttProvider = {
 };
 
 export const STT_PROVIDERS: Record<SttProviderId, SttProvider> = {
-  'openai-transcribe': {
-    id: 'openai-transcribe',
-    label: 'OpenAI gpt-4o-transcribe',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-transcribe',
-    apiKeyEnv: 'OPEN_AI_API_KEY',
+  "openai-transcribe": {
+    id: "openai-transcribe",
+    label: "OpenAI gpt-4o-transcribe",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-transcribe",
+    apiKeyEnv: "OPEN_AI_API_KEY",
   },
-  'openai-mini-transcribe': {
-    id: 'openai-mini-transcribe',
-    label: 'OpenAI gpt-4o-mini-transcribe',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini-transcribe',
-    apiKeyEnv: 'OPEN_AI_API_KEY',
+  "openai-mini-transcribe": {
+    id: "openai-mini-transcribe",
+    label: "OpenAI gpt-4o-mini-transcribe",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini-transcribe",
+    apiKeyEnv: "OPEN_AI_API_KEY",
   },
 };
 
@@ -52,9 +58,11 @@ export function resolveSttProvider(
   env: NodeJS.ProcessEnv = process.env,
 ): { provider: SttProvider; apiKey: string } | { error: string } {
   const raw = env.EVAL_STT_PROVIDER?.trim();
-  const id = (raw && raw in STT_PROVIDERS ? raw : 'openai-transcribe') as SttProviderId;
+  const id = (
+    raw && raw in STT_PROVIDERS ? raw : "openai-transcribe"
+  ) as SttProviderId;
   const provider = STT_PROVIDERS[id];
-  const apiKey = env[provider.apiKeyEnv]?.trim() ?? '';
+  const apiKey = env[provider.apiKeyEnv]?.trim() ?? "";
   if (apiKey.length === 0) {
     return {
       error:
@@ -70,19 +78,19 @@ export async function transcribeAudio(
   provider: SttProvider,
   apiKey: string,
   audio: Buffer,
-  mimeType = 'audio/wav',
+  mimeType = "audio/wav",
 ): Promise<string> {
   forceHttp1();
   const form = new FormData();
-  form.append('model', provider.model);
+  form.append("model", provider.model);
   form.append(
-    'file',
+    "file",
     new Blob([new Uint8Array(audio)], { type: mimeType }),
-    'clip.wav',
+    "clip.wav",
   );
 
   const res = await fetch(`${provider.baseUrl}/audio/transcriptions`, {
-    method: 'POST',
+    method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
   });
@@ -95,14 +103,14 @@ export async function transcribeAudio(
   }
 
   const json = (await res.json()) as { text?: string };
-  return json.text ?? '';
+  return json.text ?? "";
 }
 
 export async function transcribeAudioWithCause(
   provider: SttProvider,
   apiKey: string,
   audio: Buffer,
-  mimeType = 'audio/wav',
+  mimeType = "audio/wav",
 ): Promise<string> {
   // Transient socket failures (EPIPE, UND_ERR_SOCKET) happen under bursty
   // uploads; retry once after a short backoff.
@@ -113,16 +121,20 @@ export async function transcribeAudioWithCause(
       const cause = (err as Error)?.cause;
       const transient =
         cause instanceof Error &&
-        /EPIPE|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|ECONNRESET/iu.test(cause.message + (cause as NodeJS.ErrnoException).code ?? '');
+        /EPIPE|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|ECONNRESET/iu.test(
+          cause.message + ((cause as NodeJS.ErrnoException).code ?? ""),
+        );
       if (attempt === 2 || !transient) {
         throw new Error(
           `STT fetch failed for ${provider.id}: ${(err as Error).message} | cause: ${
-            cause instanceof Error ? `${cause.message} ${(cause as NodeJS.ErrnoException).code ?? ''}` : String(cause)
+            cause instanceof Error
+              ? `${cause.message} ${(cause as NodeJS.ErrnoException).code ?? ""}`
+              : String(cause)
           }`,
         );
       }
       await new Promise((r) => setTimeout(r, 1500 * attempt));
     }
   }
-  throw new Error('unreachable');
+  throw new Error("unreachable");
 }

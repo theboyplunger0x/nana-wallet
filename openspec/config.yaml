@@ -1,8 +1,8 @@
 schema: spec-driven
 
 context: |
-  Project: Aleph Hackathon WDK Transaction Agent.
-  Repository state: Node.js TypeScript Fastify backend with a fixture/live WDK agent boundary.
+  Project: Nana Wallet, Aleph Hackathon.
+  Repository state: Node.js TypeScript Fastify backend plus independent React/TanStack frontend in apps/nana-wallet, connected only by HTTP.
   Stack: Node.js, TypeScript, Fastify, AI SDK Core, @ai-sdk/mcp, WDK, Vitest.
   Recipient-memory foundation: PostgreSQL 16 with pgvector, pg, and Transformers.js.
   Canonical planning document: docs/architecture.md.
@@ -30,7 +30,7 @@ testing:
 
 rules:
   proposal:
-    - Keep scope aligned with the backend-only WDK transaction-agent demo in docs/architecture.md.
+    - Keep scope aligned with the approved change and Nana front/backend HTTP boundary in docs/architecture.md.
     - Include a rollback plan for risky changes involving wallet or transaction behavior.
   specs:
     - Use Given/When/Then scenarios.
