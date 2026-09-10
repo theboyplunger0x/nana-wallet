@@ -34,6 +34,7 @@ import {
   createContactsEmbedder,
 } from "./api/contacts.js";
 import { ContactsRepository } from "./memory/contacts-repository.js";
+import { EmbeddingService } from "./memory/embedding.js";
 import { FinancialTaskRegistry } from "./conversations/financial-task-registry.js";
 import {
   readApiProcessConfig,
@@ -222,14 +223,27 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
     });
 
     // PMU-007: identity-only bootstrap.
-    app.register(registerMeRoutes, { resolveUserId, database });
+        app.register(registerMeRoutes, { resolveUserId, database });
 
-    // PMU-008..013: user-scoped contacts CRUD.
-    app.register(registerContactsRoutes, {
-      resolveUserId,
-      contacts: new ContactsRepository(database),
-      embedder: createContactsEmbedder(),
-    });
+        // PMU-008..013: user-scoped contacts CRUD.
+        app.register(registerContactsRoutes, {
+          resolveUserId,
+          contacts: new ContactsRepository(database),
+          embedder: createContactsEmbedder(),
+        });
+
+        // Contact creation embeds the name through the transformers.js model;
+        // a cold load cost minutes on the first save. Warm it in the background
+        // once the server is listening so the first contact saves fast and
+        // /health is not delayed.
+        const contactsEmbedder = new EmbeddingService(
+          readRecipientMemoryConfig().modelCacheDirectory,
+        );
+        app.addHook("onReady", async () => {
+          void contactsEmbedder.prefetch().catch(() => {
+            // Prefetch is an optimization; the first create loads on demand.
+          });
+        });
 
     // PEW-001..014: user-scoped embedded wallet surface. The fixture Privy
     // client is the default (and the only mode allowed in privy identity
