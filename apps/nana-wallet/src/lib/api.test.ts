@@ -513,3 +513,33 @@ describe("personal balances API (WP-003/WP-004/WP-013)", () => {
     );
   });
 });
+
+describe("bodyless requests (contact removal fix)", () => {
+  it("does not set content-type on a DELETE without body", async () => {
+    setApiTokenSource({ getToken: async () => "token-x" });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ ok: true, data: { id: "c1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.deleteContact("c1");
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Content-Type")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps content-type on requests with a body", async () => {
+    setApiTokenSource({ getToken: async () => "token-x" });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ ok: true, data: { id: "c1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createContact({ name: "A", description: "", address: "0x1" });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+    vi.unstubAllGlobals();
+  });
+});

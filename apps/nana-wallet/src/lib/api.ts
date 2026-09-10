@@ -196,7 +196,12 @@ async function authedFetch(
   const exec = async (token: string): Promise<Response> => {
     const headers = new Headers(options.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    // Only claim a JSON body when one is actually sent: Fastify rejects an
+    // empty body with content-type application/json (bodyless DELETE/GET),
+    // which broke contact removal against the real backend.
+    if (options.body !== undefined && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
     let response: Response;
     try {
