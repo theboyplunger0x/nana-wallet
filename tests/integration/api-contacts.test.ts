@@ -1,0 +1,154 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { buildServer } from "../../src/server.js";
+import {
+  createDatabaseClient,
+  type DatabaseClient,
+} from "../../src/db/client.js";
+
+const databaseUrl = process.env.DATABASE_URL;
+const suite = databaseUrl ? describe : describe.skip;
+
+// Demo mode: the identity provider resolves every request to the demo sentinel.
+const USER_A = "00000000-0000-4000-8000-000000000001";
+
+suite("/v1/contacts CRUD (demo mode, PMU-008..012)", () => {
+  let database: DatabaseClient;
+  const previousEnv = { ...process.env };
+
+  beforeAll(async () => {
+    database = createDatabaseClient(databaseUrl!);
+  });
+
+  beforeEach(() => {
+    process.env.WDK_TOOLS_SOURCE = "fixture";
+    process.env.DEMO_USER_ID = USER_A;
+  });
+
+  afterAll(async () => {
+    await database.close();
+    process.env.DEMO_USER_ID = previousEnv.DEMO_USER_ID;
+    if (previousEnv.WDK_TOOLS_SOURCE === undefined)
+      delete process.env.WDK_TOOLS_SOURCE;
+    else process.env.WDK_TOOLS_SOURCE = previousEnv.WDK_TOOLS_SOURCE;
+  });
+
+  it("creates a confirmed user contact, lists it, versions it, archives it and reveals it", {
+    timeout: 60_000,
+  }, async () => {
+    const app = buildServer();
+    try {
+      // CREATE (201, user-provenance confirmed at creation).
+      const created = await app.inject({
+        method: "POST",
+        url: "/v1/contacts",
+        payload: {
+          name: "Lucas Nieto",
+          description: "mi nieto",
+          address: "0x9999999999999999999999999999999999999999",
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const contact = created.json().data;
+      expect(contact).toMatchObject({
+        name: "Lucas Nieto",
+        version: 1,
+        status: "active",
+      });
+
+      // Provenance stored as user-confirmed.
+      const provenance = await database.query<{
+        provenance: { origin?: string };
+      }>("SELECT provenance FROM recipients WHERE id = $1", [contact.id]);
+      expect(provenance.rows[0]?.provenance?.origin).toBe("user");
+
+      // LIST includes only active.
+      const list = await app.inject({ method: "GET", url: "/v1/contacts" });
+      expect(
+        list.json().data.some((c: { id: string }) => c.id === contact.id),
+      ).toBe(true);
+
+      // PATCH creates a new version; prior snapshot retained.
+      const patched = await app.inject({
+        method: "PATCH",
+        url: `/v1/contacts/${contact.id}`,
+        payload: {
+          address: "0x8888888888888888888888888888888888888888",
+          expectedVersion: 1,
+        },
+      });
+      expect(patched.statusCode).toBe(200);
+      expect(patched.json().data).toMatchObject({
+        version: 2,
+        address: "0x8888888888888888888888888888888888888888",
+      });
+      const versions = await database.query<{ version: number }>(
+        "SELECT version FROM recipient_versions WHERE recipient_id = $1 ORDER BY version",
+        [contact.id],
+      );
+      expect(versions.rows.map((r) => Number(r.version))).toEqual([1]);
+
+      // Stale expectedVersion -> 409.
+      const stale = await app.inject({
+        method: "PATCH",
+        url: `/v1/contacts/${contact.id}`,
+        payload: { name: "Otro", expectedVersion: 1 },
+      });
+      expect(stale.statusCode).toBe(409);
+
+      // REVEAL returns the plain current address.
+      const revealed = await app.inject({
+        method: "POST",
+        url: `/v1/contacts/${contact.id}/reveal-cbu`,
+      });
+      expect(revealed.statusCode).toBe(200);
+      expect(revealed.json().data.address).toBe(
+        "0x8888888888888888888888888888888888888888",
+      );
+
+      // DELETE soft-deletes (excluded from list, row remains).
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/v1/contacts/${contact.id}`,
+      });
+      expect(deleted.statusCode).toBe(200);
+      expect(deleted.json().data.status).toBe("inactive");
+      const afterList = await app.inject({
+        method: "GET",
+        url: "/v1/contacts",
+      });
+      expect(
+        afterList.json().data.some((c: { id: string }) => c.id === contact.id),
+      ).toBe(false);
+      const row = await database.query<{ status: string }>(
+        "SELECT status FROM recipients WHERE id = $1",
+        [contact.id],
+      );
+      expect(row.rows[0]?.status).toBe("inactive");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns the not-found shape for a missing id and 422 for a bad address", {
+    timeout: 60_000,
+  }, async () => {
+    const app = buildServer();
+    try {
+      const missing = await app.inject({
+        method: "PATCH",
+        url: `/v1/contacts/00000000-0000-4000-8000-00000000dead`,
+        payload: { name: "X", expectedVersion: 1 },
+      });
+      expect(missing.statusCode).toBe(404);
+
+      const badAddress = await app.inject({
+        method: "POST",
+        url: "/v1/contacts",
+        payload: { name: "X", description: "", address: "not-an-address" },
+      });
+      expect(badAddress.statusCode).toBe(422);
+    } finally {
+      await app.close();
+    }
+  });
+});

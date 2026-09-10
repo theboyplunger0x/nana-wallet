@@ -12,24 +12,28 @@
  *
  * Usage: npx tsx evals/voice/stt/download-dataset.ts
  */
-import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
-import { createGunzip } from 'node:zlib';
-import { pipeline } from 'node:stream/promises';
-import { extract as tarExtract, type ReadEntry } from 'tar-stream';
+import { createWriteStream } from "node:fs";
+import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { createGunzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
+import {
+  extract as tarExtract,
+  type Header,
+  type ExtractEvents,
+} from "tar-stream";
 
 const CLIP_COUNT = 30;
 
 const TSV_URL =
-  'https://huggingface.co/datasets/google/fleurs/resolve/main/data/es_419/test.tsv';
+  "https://huggingface.co/datasets/google/fleurs/resolve/main/data/es_419/test.tsv";
 const TAR_URL =
-  'https://huggingface.co/datasets/google/fleurs/resolve/main/data/es_419/audio/test.tar.gz';
+  "https://huggingface.co/datasets/google/fleurs/resolve/main/data/es_419/audio/test.tar.gz";
 
-const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.audio');
-const MANIFEST_PATH = join(OUT_DIR, 'manifest.json');
+const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".audio");
+const MANIFEST_PATH = join(OUT_DIR, "manifest.json");
 
 type TsvRow = {
   id: string;
@@ -61,22 +65,22 @@ function selectClips(rows: TsvRow[], count: number): TsvRow[] {
 
 function parseTsv(content: string): TsvRow[] {
   return content
-    .split('\n')
+    .split("\n")
     .filter((line) => line.trim().length > 0)
     .map((line) => {
-      const cols = line.split('\t');
+      const cols = line.split("\t");
       return {
-        id: cols[0]?.trim() ?? '',
-        file: cols[1]?.trim() ?? '',
-        transcription: cols[2]?.trim() ?? '',
-        rawTranscription: cols[3]?.trim() ?? '',
+        id: cols[0]?.trim() ?? "",
+        file: cols[1]?.trim() ?? "",
+        transcription: cols[2]?.trim() ?? "",
+        rawTranscription: cols[3]?.trim() ?? "",
       };
     })
     .filter((r) => r.file.length > 0 && r.transcription.length > 0);
 }
 
 async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, { redirect: 'follow' });
+  const res = await fetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
   return res.text();
 }
@@ -85,7 +89,7 @@ async function manifestIsComplete(
   expectedFiles: Set<string>,
 ): Promise<boolean> {
   try {
-    const raw = await readFile(MANIFEST_PATH, 'utf8');
+    const raw = await readFile(MANIFEST_PATH, "utf8");
     const manifest = JSON.parse(raw) as { clips?: Array<{ file: string }> };
     const clips = manifest.clips ?? [];
     if (clips.length !== expectedFiles.size) return false;
@@ -101,14 +105,14 @@ async function manifestIsComplete(
 async function main(): Promise<void> {
   await mkdir(OUT_DIR, { recursive: true });
 
-  console.log('Fetching FLEURS es_419 test.tsv …');
+  console.log("Fetching FLEURS es_419 test.tsv …");
   const rows = parseTsv(await fetchText(TSV_URL));
   console.log(`TSV rows: ${rows.length}`);
 
   const selected = selectClips(rows, CLIP_COUNT);
   const wanted = new Map(selected.map((r) => [r.file, r]));
 
-  if (await manifestIsComplete(wanted)) {
+  if (await manifestIsComplete(new Set(wanted.keys()))) {
     console.log(
       `Manifest already complete with ${wanted.size} clips — nothing to do.`,
     );
@@ -119,47 +123,73 @@ async function main(): Promise<void> {
     `Selected ${selected.length} clips. Streaming audio tarball (stops early once all clips are extracted) …`,
   );
 
-  const curl = spawn(
-    'curl',
-    ['-sL', '--max-time', '600', TAR_URL],
-    { stdio: ['ignore', 'pipe', 'inherit'] },
-  );
+  const curl = spawn("curl", ["-sL", "--max-time", "600", TAR_URL], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
 
   const extract = tarExtract();
 
   const extracted = new Set<string>();
   let stopping = false;
 
-  extract.on('entry', (entry: ReadEntry, stream, next) => {
-    const base = entry.name.split('/').pop() ?? entry.name;
-    const row = wanted.get(base);
-    if (!row || entry.type !== 'file' || stopping) {
-      stream.resume();
-      next();
-      return;
-    }
-    const out = createWriteStream(join(OUT_DIR, base));
-    stream.pipe(out);
-    out.on('finish', () => {
-      extracted.add(base);
-      next();
-      if (extracted.size === wanted.size) {
-        // All clips retrieved — stop the download to avoid pulling 700MB.
-        stopping = true;
-        curl.kill('SIGKILL');
-        extract.destroy();
+  // tar-stream v3 exports the entry callback pieces as Header + Source (Source itself is
+  // not exported); this structural stream type covers the pipe/resume usage below.
+  // tar-stream v3: entry callback args via the exported ExtractEvents tuple
+  // (Header + Source + next); Source itself is not exported so it is indexed here.
+  extract.on(
+    "entry",
+    (
+      entry: Header,
+      stream: ExtractEvents["entry"][1],
+      next: ExtractEvents["entry"][2],
+    ) => {
+      const base = entry.name.split("/").pop() ?? entry.name;
+      const row = wanted.get(base);
+      if (!row || entry.type !== "file" || stopping) {
+        stream.resume();
+        next();
+        return;
       }
-    });
-    out.on('error', (err) => next(err));
-  });
+      const out = createWriteStream(join(OUT_DIR, base));
+      // SAFETY: streamx Source.pipe expects a streamx Writable, but an
+      // fs.WriteStream is runtime pipe-compatible with streamx sources
+      // (streamx checks for the write/drain surface); the cast narrows only
+      // that compatibility for the type checker.
+      stream.pipe(out as unknown as Parameters<typeof stream.pipe>[0]);
+      out.on("finish", () => {
+        extracted.add(base);
+        next();
+        if (extracted.size === wanted.size) {
+          // All clips retrieved — stop the download to avoid pulling 700MB.
+          stopping = true;
+          curl.kill("SIGKILL");
+          extract.destroy();
+        }
+      });
+      out.on("error", (err) => next(err));
+    },
+  );
 
   try {
-    await pipeline(curl.stdout, createGunzip(), extract);
+    // SAFETY: tar-stream v3's Extract extends streamx Writable, which is pipe-compatible
+    // with node streams but not structurally assignable to the node WritableStream
+    // overload of pipeline; the cast states exactly that runtime compatibility.
+    await pipeline(
+      curl.stdout,
+      createGunzip(),
+      extract as unknown as import("node:stream").Writable,
+    );
   } catch (err) {
     // Destroying the extract stream on purpose surfaces as a premature-close
     // error from streamx; that is the expected early-stop path.
     const code = (err as NodeJS.ErrnoException)?.code;
-    if (!(stopping && (code === 'ERR_STREAM_PREMATURE_CLOSE' || code === 'ERR_STREAM_DESTROYED'))) {
+    if (
+      !(
+        stopping &&
+        (code === "ERR_STREAM_PREMATURE_CLOSE" ||
+          code === "ERR_STREAM_DESTROYED")
+      )
+    ) {
       throw err;
     }
   }
@@ -167,15 +197,15 @@ async function main(): Promise<void> {
   if (extracted.size !== wanted.size) {
     throw new Error(
       `Expected ${wanted.size} clips, extracted ${extracted.size}. ` +
-        'The tar stream ended before all selected clips were found.',
+        "The tar stream ended before all selected clips were found.",
     );
   }
 
   const manifest = {
-    source: 'google/fleurs',
-    config: 'es_419',
-    split: 'test',
-    license: 'CC-BY-4.0',
+    source: "google/fleurs",
+    config: "es_419",
+    split: "test",
+    license: "CC-BY-4.0",
     url: TAR_URL,
     fetchedAt: new Date().toISOString(),
     clipCount: extracted.size,
@@ -186,7 +216,7 @@ async function main(): Promise<void> {
       rawTranscription: r.rawTranscription,
     })),
   };
-  await writeFile(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n');
+  await writeFile(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
 
   console.log(
     `Done. ${extracted.size} clips + manifest written to ${resolve(OUT_DIR)}`,
@@ -194,6 +224,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('Download failed:', err);
+  console.error("Download failed:", err);
   process.exit(1);
 });

@@ -60,3 +60,9 @@ WU1 → WU2 → WU3 (back en verde) ∥ WU4 (front) → WU5 → WU6.
   ninguno toca los mismos archivos críticos; mergeable en cualquier orden.
 - No tocar el flujo preview→confirm ni la wallet singleton (sprint siguiente:
   wallet por usuario con Privy embedded wallets / ZeroDev).
+
+## Corrección del alcance, 2026-09-08
+
+WU1 incluye prerequisites de conversations/live leases locales, policy exclusiva del owner y prueba con owner NOBYPASSRLS. WU2 incluye autorización de voz y la restricción fixture-only en Privy. WU3 debe resolver versionado histórico y embeddings requeridos. WU4 incluye identidad desde `/v1/me`, limpieza de sesión y rechazo de respuestas tardías. WU5 preserva binding.sub con emisión autenticada. WU6 exige evals, ambos builds y E2E de navegador con dos usuarios; smoke WDK no lo reemplaza.
+
+Estas correcciones reemplazan las exclusiones de voz y afirmaciones de independencia de archivos del outline histórico. La estrategia de entrega es chained/stacked-to-main. No se inició implementación ni se afirma una revisión independiente nueva.

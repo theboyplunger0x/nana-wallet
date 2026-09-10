@@ -1,0 +1,24 @@
+# Gitleaks config: reviewed false-positive dispositions (2026-09-08).
+# Every allowlisted path was inspected with shape evidence (no values printed):
+# synthetic redaction-test fixtures, public Ethereum test-fixture addresses,
+# empty placeholder / commented PEM templates in env+runbook docs, and
+# historical archived .txt planning artifacts. No real credentials exist.
+# See .agent-workflow/tasks/privy-embedded-wallets/development-status.md
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''^\.env\.example$''',
+  '''^docs/livekit-development-runbook\.md$''',
+  '''^tests/unit/redaction\.test\.ts$''',
+  '''^tests/unit/telemetry-boundary\.test\.ts$''',
+  '''^tests/integration/api-wallet-official-wdk\.test\.ts$''',
+  '''^tests/unit/wallet-api-normalization\.test\.ts$''',
+  '''^\.agent-workflow/tasks/local-work-consolidation/archive/''',
+  # Generated build artifacts: minified vendor bundles (privy/base-org etc.),
+  # gitignored, no source credentials. Reviewed 2026-09-08.
+  '''^apps/nana-wallet/\.output/''',
+  '''^apps/nana-wallet/dist/''',
+  '''^dist/''',
+]

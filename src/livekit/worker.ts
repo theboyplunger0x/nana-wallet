@@ -14,6 +14,7 @@ import {
   type LiveKitWorkerConfig,
   type WorkerProcessConfig,
 } from "../config/process.js";
+import { resolveDefaultAgentName } from "../config/livekit.js";
 import { FinancialTaskRegistry } from "../conversations/financial-task-registry.js";
 import { createWalletConversationService } from "../conversations/service.js";
 import { getConfiguredRecipientMemoryService } from "../memory/runtime.js";
@@ -28,6 +29,7 @@ import {
   createWorkerDependencies,
   type WorkerDependencies,
 } from "../runtime/dependencies.js";
+import { bindWalletForUser } from "../wallet/privy-user-provider.js";
 
 export { readLiveKitWorkerConfig } from "../config/process.js";
 export type { LiveKitWorkerConfig } from "../config/process.js";
@@ -83,6 +85,9 @@ async function runJob(
     conversation: roomConversation,
     startSession: async (binding) => {
       const memoryService = getConfiguredRecipientMemoryService();
+      const wallet = dependencies.walletForUser
+        ? bindWalletForUser(dependencies.walletForUser, binding.userId)
+        : dependencies.wallet;
       // REVIEW FIX V3 (voice path): the voice service is built per binding so its
       // recipient memory runtime scopes to `binding.sub` — never the demo tenant.
       // It shares the repository, wallet, and financialTasks with the worker so all
@@ -90,15 +95,17 @@ async function runJob(
       // claim and emit revisions through the same frontend data topic.
       const voiceService = createWalletConversationService({
         conversations: dependencies.conversations,
-        wallet: dependencies.wallet,
-        ...(memoryService ? { memory: { userId: binding.userId, service: memoryService } } : {}),
+        wallet,
+        ...(memoryService
+          ? { memory: { userId: binding.userId, service: memoryService } }
+          : {}),
         financialTasks: dependencies.financialTasks,
         contextRenewal: dependencies.contextRenewal,
       });
       const tools = createRealtimeTools({
         conversationId: binding.conversationId,
         userId: binding.userId,
-        wallet: dependencies.wallet,
+        wallet,
         service: voiceService,
         conversations: dependencies.conversations,
         ...(memoryService ? { recipientMemory: memoryService } : {}),
@@ -200,6 +207,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   cli.runApp(
     new ServerOptions({
       agent: fileURLToPath(import.meta.url),
+      // The room token issuer dispatches explicitly by agent name
+      // (token-issuer.ts → RoomConfiguration.agents, default
+      // LIVEKIT_AGENT_NAME ?? 'nani-agent'). The worker must register under
+      // the SAME name or explicit dispatch targets no registered worker.
+      // resolveDefaultAgentName is the shared source both sides use.
+      agentName: resolveDefaultAgentName(),
       wsURL: config.url,
       apiKey: config.apiKey,
       apiSecret: config.apiSecret,

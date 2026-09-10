@@ -5,10 +5,11 @@ export type WalletAgentConfig = {
 };
 
 export function getWalletAgentConfig(): WalletAgentConfig {
+  const privyUserWallet = process.env.IDENTITY_PROVIDER === 'privy';
   return {
-    wallet: process.env.WDK_WALLET_NAME ?? 'agent-demo',
-    network: process.env.WDK_NETWORK ?? 'sepolia',
-    token: process.env.WDK_TOKEN ?? 'USDT',
+    wallet: process.env.WDK_WALLET_NAME ?? (privyUserWallet ? 'privy-user' : 'agent-demo'),
+    network: process.env.WDK_NETWORK ?? (privyUserWallet ? 'arc-testnet' : 'sepolia'),
+    token: process.env.WDK_TOKEN ?? (privyUserWallet ? 'USDC' : 'USDT'),
   };
 }
 

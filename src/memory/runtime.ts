@@ -1,12 +1,12 @@
-import { readRecipientMemoryConfig } from '../config/env.js';
-import { createDatabaseClient, type DatabaseClient } from '../db/client.js';
-import { EmbeddingService } from './embedding.js';
-import { RecipientMemoryRepository } from './repository.js';
-import { RecipientMemoryService } from './service.js';
+import { readRecipientMemoryConfig } from "../config/env.js";
+import { createDatabaseClient, type DatabaseClient } from "../db/client.js";
+import { EmbeddingService } from "./embedding.js";
+import { RecipientMemoryRepository } from "./repository.js";
+import { RecipientMemoryService } from "./service.js";
 
 export type RecipientMemoryRuntime = {
-  userId: string;
-  service: RecipientMemoryService;
+ userId: string;
+ service: RecipientMemoryService;
 };
 
 let configuredRuntime: RecipientMemoryRuntime | undefined;
@@ -20,19 +20,19 @@ let configuredDatabase: DatabaseClient | undefined;
  * Returns undefined when recipient memory is disabled or `DATABASE_URL` is absent.
  */
 function buildConfiguredMemoryService(
-  environment: NodeJS.ProcessEnv,
+ environment: NodeJS.ProcessEnv,
 ): RecipientMemoryService | undefined {
-  const config = readRecipientMemoryConfig(environment);
-  if (!config.enabled || !config.databaseUrl) return undefined;
-  if (!configuredMemoryService) {
-    configuredDatabase = createDatabaseClient(config.databaseUrl);
-    configuredMemoryService = new RecipientMemoryService(
-      new RecipientMemoryRepository(configuredDatabase),
-      new EmbeddingService(config.modelCacheDirectory),
-      { scoreThreshold: config.scoreThreshold, scoreMargin: config.scoreMargin },
-    );
-  }
-  return configuredMemoryService;
+ const config = readRecipientMemoryConfig(environment);
+ if (!config.enabled || !config.databaseUrl) return undefined;
+ if (!configuredMemoryService) {
+  configuredDatabase = createDatabaseClient(config.databaseUrl);
+  configuredMemoryService = new RecipientMemoryService(
+   new RecipientMemoryRepository(configuredDatabase),
+   new EmbeddingService(config.modelCacheDirectory),
+   { scoreThreshold: config.scoreThreshold, scoreMargin: config.scoreMargin },
+  );
+ }
+ return configuredMemoryService;
 }
 
 /**
@@ -42,13 +42,14 @@ function buildConfiguredMemoryService(
  * the binding user via {@link getConfiguredRecipientMemoryService} + the binding `userId`.
  */
 export function getConfiguredRecipientMemoryRuntime(
-  environment: NodeJS.ProcessEnv = process.env,
+ environment: NodeJS.ProcessEnv = process.env,
 ): RecipientMemoryRuntime | undefined {
-  const config = readRecipientMemoryConfig(environment);
-  if (!config.enabled || !config.databaseUrl || !config.demoUserId) return undefined;
-  const service = buildConfiguredMemoryService(environment);
-  if (!service) return undefined;
-  return { userId: config.demoUserId, service };
+ const config = readRecipientMemoryConfig(environment);
+ if (!config.enabled || !config.databaseUrl || !config.demoUserId)
+  return undefined;
+ const service = buildConfiguredMemoryService(environment);
+ if (!service) return undefined;
+ return { userId: config.demoUserId, service };
 }
 
 /**
@@ -57,14 +58,30 @@ export function getConfiguredRecipientMemoryRuntime(
  * the actual user of the session — instead of the singleton demo user.
  */
 export function getConfiguredRecipientMemoryService(
-  environment: NodeJS.ProcessEnv = process.env,
+ environment: NodeJS.ProcessEnv = process.env,
 ): RecipientMemoryService | undefined {
-  return buildConfiguredMemoryService(environment);
+ return buildConfiguredMemoryService(environment);
+}
+
+/**
+ * PMU-014: per-request text-path runtime factory. Builds a runtime whose userId
+ * is the RESOLVED internal UUID (never a fixed demo tenant) over the shared
+ * tenant-agnostic service. Returns undefined when memory is disabled or the
+ * database is absent. Demo mode callers may still use the configured demo
+ * runtime, but HTTP paths must scope by the resolved user.
+ */
+export function getMemoryRuntimeForUser(
+ userId: string,
+ environment: NodeJS.ProcessEnv = process.env,
+): RecipientMemoryRuntime | undefined {
+ const service = buildConfiguredMemoryService(environment);
+ if (!service) return undefined;
+ return { userId, service };
 }
 
 export async function closeConfiguredRecipientMemoryRuntime(): Promise<void> {
-  await configuredDatabase?.close();
-  configuredRuntime = undefined;
-  configuredMemoryService = undefined;
-  configuredDatabase = undefined;
+ await configuredDatabase?.close();
+ configuredRuntime = undefined;
+ configuredMemoryService = undefined;
+ configuredDatabase = undefined;
 }

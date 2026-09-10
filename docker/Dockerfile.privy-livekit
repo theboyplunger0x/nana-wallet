@@ -1,0 +1,2 @@
+FROM livekit/livekit-server:v1.13.6
+COPY docker/privy-livekit.yaml /etc/livekit.yaml

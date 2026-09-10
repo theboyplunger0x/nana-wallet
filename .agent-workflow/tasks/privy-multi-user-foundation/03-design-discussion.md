@@ -140,3 +140,13 @@ Supabase Auth, migración de datos del demo.
 ## Corrección del review antes del merge
 
 El sentinel se provisiona únicamente al arrancar en modo demo o antes del seed, con el UUID configurado. Esto evita que una fila insertada por la migración con UUID aleatorio bloquee todos los arranques posteriores. Proposal, spec, design y tasks reflejan la misma decisión.
+
+## Revisión 2026-09-08
+
+El usuario autorizó corregir los hallazgos de la revisión y preparar la spec dependiente de wallet embebida. Esta revisión agrega autorización de room-token, identidad de voz desde `/v1/me`, aislamiento al cambiar de cuenta, policy de provisioning limitada al owner bajo FORCE RLS, migraciones locales completas, bloqueo de wallet singleton live en modo Privy y E2E de navegador. El detalle normativo está en PMU-020 a PMU-025 y en el diseño actualizado de OpenSpec.
+
+La aprobación histórica de D1/D4/login/D5 se conserva. Las frases anteriores que dejan voz sin cambios o que asumen bypass por ser owner quedan sustituidas por esta revisión. El trabajo autorizado en esta conversación es documental; no se registra aprobación de apply.
+
+La promesa histórica de SMS/WhatsApp se precisa mediante D7: email más un único canal telefónico configurado. La documentación actual de Privy no permite ofrecer ambos a la vez; esa elección sigue pendiente, sin alterar el dashboard.
+
+D7 resuelta en la respuesta posterior del usuario: conservar el canal existente más email. El valor SMS/WhatsApp sigue sin verificarse por falta de acceso Privy; no es una nueva elección de producto.

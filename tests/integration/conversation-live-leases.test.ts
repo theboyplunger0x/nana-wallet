@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createDatabaseClient } from "../../src/db/client.js";
 import { PostgresConversationRepository } from "../../src/conversations/postgres-repository.js";
 import type { LiveConversationLease } from "../../src/conversations/repository.js";
+import { provisionTestUser } from "../fixtures/provision-user.js";
 
 const userId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+beforeAll(async () => {
+  await provisionTestUser(userId);
+});
 
 function lease(
   conversationId: string,

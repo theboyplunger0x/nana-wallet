@@ -7,16 +7,19 @@ import type {
   Contact,
   CreateAgendaEventInput,
   CreateContactInput,
-  EmptyResponse,
+  CurrentWalletResponse,
   ErrCode,
-  Me,
+  MeResponse,
   MovementsPage,
   PaymentIntent,
   PaymentResult,
   ConversationTurnResult,
   TransferIntentInput,
   UpdateContactInput,
+  WalletPermissionResponse,
+  WalletRevokeResponse,
   WalletSummary,
+  WalletSyncResponse,
 } from "@/lib/api-types";
 import { shouldUseLiveAgentBackend } from "@/lib/live-agent";
 import { classifySessionSubmission } from "@/lib/session-resolution";
@@ -104,47 +107,27 @@ let movements: MovementsPage["items"] = [
   },
 ];
 
-let contacts: Contact[] = [
-  {
-    id: "contact-sofia",
-    displayName: "Sofía",
-    relationship: "Nieta",
-    alias: "sofi.mate.rio",
-    cbuLast4: "0001",
-    bankName: "Banco Nación",
-    holderName: "Sofía Bianchi",
-    verifiedAt: "2026-08-01T12:00:00-03:00",
-    avatarInitials: "SB",
-  },
-  {
-    id: "contact-julian",
-    displayName: "Julián",
-    relationship: "Nieto",
-    alias: "juli.bici.sol",
-    cbuLast4: "0002",
-    bankName: "Banco Provincia",
-    holderName: "Julián Bianchi",
-    verifiedAt: "2026-08-01T12:00:00-03:00",
-    avatarInitials: "JB",
-  },
-  {
-    id: "contact-marta",
-    displayName: "Marta",
-    relationship: "Hija",
-    alias: "marta.flor.luz",
-    cbuLast4: "0003",
-    bankName: "Banco Nación",
-    holderName: "Marta Bianchi",
-    verifiedAt: "2026-08-01T12:00:00-03:00",
-    avatarInitials: "MB",
-  },
-];
+const seededContact = (
+  id: string,
+  name: string,
+  description: string,
+  address: string,
+): Contact => ({
+  id,
+  name,
+  description,
+  address,
+  version: 1,
+  status: "active",
+  createdAt: "2026-08-01T12:00:00-03:00",
+  updatedAt: "2026-08-01T12:00:00-03:00",
+});
 
-const fullCbus: Record<string, string> = {
-  "contact-sofia": "0000003100010000000001",
-  "contact-julian": "0000003100010000000002",
-  "contact-marta": "0000003100010000000003",
-};
+let contacts: Contact[] = [
+  seededContact("contact-sofia", "Sofía", "Mi nieta", "0000003100010000000001"),
+  seededContact("contact-julian", "Julián", "Mi nieto", "0000003100010000000002"),
+  seededContact("contact-marta", "Marta", "Mi hija", "0000003100010000000003"),
+];
 
 const revealCounts = new Map<string, number>();
 
@@ -227,16 +210,37 @@ let bills: Bill[] = [
   },
 ];
 
-const me: Me = {
+const me: MeResponse = {
+  userId: "22222222-2222-4222-8222-222222222222",
   displayName: "Héctor Bianchi",
-  greetingName: "Don Héctor",
-  initials: "H",
-  documentLast3: "552",
-  city: "Lanús",
-  verifiedAt: "2026-07-18T11:00:00-03:00",
-  verificationHuman: "Tus datos están bien",
-  dailyLimit: { amount: "500000", currency: "ARS", display: "$ 500.000" },
-  dailySpent: { amount: "43450", currency: "ARS", display: "$ 43.450" },
+};
+
+const READY_WALLET_ADDRESS = "0x4b1f8c9e2d7a3f5b6c0d4e1f2a3b4c5d6e7f8a9b";
+const GRANTED_RECIPIENTS = [
+  "0x1111111111111111111111111111111111111111",
+  "0x2222222222222222222222222222222222222222",
+];
+
+// Wallet readiness is separate from permission readiness (PEW-005). Toggle
+// these by hand to exercise the demo states; defaults are a ready wallet and
+// an active, user-revocable grant.
+let walletReadiness: CurrentWalletResponse = {
+  userId: me.userId,
+  state: "ready",
+  address: READY_WALLET_ADDRESS,
+  chainFamily: "arc",
+  provider: "privy",
+};
+
+let walletPermission: WalletPermissionResponse = {
+  userId: me.userId,
+  state: "active",
+  perTransferUsdc: "10",
+  rollingTotalUsdc: "50",
+  rollingWindowSeconds: 3600,
+  gasCeiling: "0.0002 ETH",
+  recipients: GRANTED_RECIPIENTS,
+  aggregateOvershootCaveat: true,
 };
 
 type StoredIntent = {
@@ -265,13 +269,12 @@ function makeTransferIntent(input: TransferIntentInput): PaymentIntent | null {
     intentId,
     expiresAt: new Date(Date.now() + 120_000).toISOString(),
     confirmation: {
-      headline: `Vas a mandarle plata a ${contact.displayName}`,
+      headline: `Vas a mandarle plata a ${contact.name}`,
       amountDisplay,
       fromAccountDisplay: "De tus pesos",
       detailLines: [
-        `A ${contact.displayName} (tu ${contact.relationship.toLocaleLowerCase("es-AR")})`,
-        ...(contact.alias ? [`Alias ${contact.alias}`] : []),
-        `CBU terminado en ${contact.cbuLast4}`,
+        `A ${contact.name}${contact.description ? ` (${contact.description})` : ""}`,
+        `Dirección ${contact.address}`,
       ],
       warnings: ["Después te van a quedar $392.300"],
       confirmLabel: `Sí, mandar ${amountDisplay.replace("$ ", "$")}`,
@@ -282,9 +285,9 @@ function makeTransferIntent(input: TransferIntentInput): PaymentIntent | null {
   intents.set(intentId, {
     kind: "transfer",
     intent,
-    receiptHeadline: `Listo, le mandaste plata a ${contact.displayName}`,
+    receiptHeadline: `Listo, le mandaste plata a ${contact.name}`,
     sourceId: contact.id,
-    movementTitle: `Transferencia a ${contact.displayName}`,
+    movementTitle: `Transferencia a ${contact.name}`,
     amount: input.amount,
   });
   return intent;
@@ -403,11 +406,22 @@ function confirmIntent(request: Request, intentId: string, kind: StoredIntent["k
   return ok(result);
 }
 
+/** MSW request URLs are always absolute; parse defensively anyway. */
+function safeUrl(request: Request): URL {
+  try {
+    return new URL(request.url);
+  } catch {
+    // Malformed request URL in a mock context: fall back to a root URL so the
+    // handler degrades gracefully instead of throwing inside MSW.
+    return new URL("http://localhost/");
+  }
+}
+
 export const handlers = [
   http.get(apiPath("/wallet/summary"), () => ok(walletSummary)),
 
   http.get(apiPath("/wallet/movements"), ({ request }) => {
-    const url = new URL(request.url);
+    const url = safeUrl(request);
     const limit = Math.max(1, Number(url.searchParams.get("limit") ?? "20"));
     const cursor = Number(url.searchParams.get("cursor") ?? "0");
     const items = movements.slice(cursor, cursor + limit);
@@ -418,14 +432,22 @@ export const handlers = [
     });
   }),
 
-  http.get(apiPath("/contacts"), () => ok(contacts)),
+  http.get(apiPath("/contacts"), () =>
+    ok(contacts.filter((contact) => contact.status === "active")),
+  ),
 
   http.post(apiPath("/contacts"), async ({ request }) => {
     const input = (await request.json()) as CreateContactInput;
+    const now = new Date().toISOString();
     const contact: Contact = {
       id: crypto.randomUUID(),
-      ...input,
-      verifiedAt: null,
+      name: input.name,
+      description: input.description,
+      address: input.address,
+      version: 1,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
     };
     contacts = [...contacts, contact];
     return ok(contact, 201);
@@ -434,37 +456,54 @@ export const handlers = [
   http.patch(apiPath("/contacts/:id"), async ({ params, request }) => {
     const contactId = String(params["id"]);
     const input = (await request.json()) as UpdateContactInput;
-    const index = contacts.findIndex((item) => item.id === contactId);
-    const current = contacts[index];
+    const current = contacts.find((item) => item.id === contactId);
     if (!current) return err("NO_ENCONTRADO", "No encontramos a esa persona.", 404);
-    const updated = { ...current, ...input };
+    if (input.expectedVersion !== current.version) {
+      return err(
+        "DUPLICADO",
+        "Esta persona cambió. Recargá para ver los datos y probá de nuevo.",
+        409,
+      );
+    }
+    const updated: Contact = {
+      ...current,
+      name: input.name ?? current.name,
+      description: input.description ?? current.description,
+      address: input.address ?? current.address,
+      version: current.version + 1,
+      updatedAt: new Date().toISOString(),
+    };
     contacts = contacts.map((item) => (item.id === contactId ? updated : item));
     return ok(updated);
   }),
 
   http.delete(apiPath("/contacts/:id"), ({ params }) => {
     const contactId = String(params["id"]);
-    if (!contacts.some((item) => item.id === contactId)) {
-      return err("NO_ENCONTRADO", "No encontramos a esa persona.", 404);
-    }
-    contacts = contacts.filter((item) => item.id !== contactId);
-    return ok<EmptyResponse>({});
+    const current = contacts.find((item) => item.id === contactId);
+    if (!current) return err("NO_ENCONTRADO", "No encontramos a esa persona.", 404);
+    const archived: Contact = {
+      ...current,
+      status: "inactive",
+      updatedAt: new Date().toISOString(),
+    };
+    contacts = contacts.map((item) => (item.id === contactId ? archived : item));
+    return ok(archived);
   }),
 
   http.post(apiPath("/contacts/:id/reveal-cbu"), ({ params }) => {
     const contactId = String(params["id"]);
-    const cbu = fullCbus[contactId];
-    if (!cbu) return err("NO_ENCONTRADO", "No encontramos ese CBU.", 404);
+    const contact = contacts.find((item) => item.id === contactId && item.status === "active");
+    if (!contact) return err("NO_ENCONTRADO", "No encontramos esa dirección.", 404);
     const count = revealCounts.get(contactId) ?? 0;
     if (count >= 5) {
       return err(
         "DEMASIADOS_INTENTOS",
-        "Ya copiaste este CBU varias veces. Probá de nuevo más tarde.",
+        "Ya copiaste esta dirección varias veces. Probá de nuevo más tarde.",
         429,
       );
     }
     revealCounts.set(contactId, count + 1);
-    return ok({ cbu });
+    return ok({ id: contact.id, address: contact.address });
   }),
 
   http.get(apiPath("/agenda"), () => ok(agendaEvents)),
@@ -477,7 +516,7 @@ export const handlers = [
   }),
 
   http.get(apiPath("/bills"), ({ request }) => {
-    const url = new URL(request.url);
+    const url = safeUrl(request);
     const status = url.searchParams.get("status");
     const filtered = status ? bills.filter((bill) => bill.status === status) : bills;
     return ok(filtered);
@@ -653,4 +692,46 @@ export const handlers = [
   }),
 
   http.get(apiPath("/me"), () => ok(me)),
+
+  // PEW-005/007/013: wallet lifecycle + permission surface. Readiness is
+  // separate from permission readiness; these are user-scoped and never
+  // expose signing credentials or raw transactions.
+  http.get(apiPath("/wallets/current"), () => ok<CurrentWalletResponse>(walletReadiness)),
+
+  http.post(apiPath("/wallets/sync"), () => {
+    const wasUnprovisioned =
+      walletReadiness.state === "unprovisioned" || walletReadiness.state === "conflict";
+    if (walletReadiness.state !== "ready") {
+      walletReadiness = { ...walletReadiness, state: "ready" };
+    }
+    return ok<WalletSyncResponse>({
+      userId: walletReadiness.userId,
+      state: walletReadiness.state,
+      address: walletReadiness.address,
+      created: wasUnprovisioned,
+    });
+  }),
+
+  http.get(apiPath("/wallets/current/permission"), () =>
+    ok<WalletPermissionResponse>(walletPermission),
+  ),
+
+  http.post(apiPath("/wallets/current/permission/revoke"), () => {
+    if (walletPermission.state !== "active") {
+      // No active grant: matches the backend, which reports unavailable when
+      // no user-revocable grant exists.
+      return ok<WalletRevokeResponse>({
+        userId: walletPermission.userId,
+        state: walletPermission.state,
+        remote: walletPermission.state === "revoked" ? "revoked" : "unavailable",
+      });
+    }
+    // Simulate a successful remote provider removal (active -> revoked).
+    walletPermission = { ...walletPermission, state: "revoked" };
+    return ok<WalletRevokeResponse>({
+      userId: walletPermission.userId,
+      state: "revoked",
+      remote: "revoked",
+    });
+  }),
 ];

@@ -5,14 +5,24 @@ import {
   createRootRouteWithContext,
   HeadContent,
   Scripts,
+  useNavigate,
+  useRouterState,
 } from "@tanstack/react-router";
+import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { setApiTokenSource } from "../lib/api";
 import { BottomNav } from "../components/BottomNav";
+import { RoutePending } from "../components/RouteStates";
 import { Button } from "../components/ui/button";
 import { Toaster } from "../components/ui/sonner";
+import { PRIVY_PROVIDER_CONFIG } from "../features/wallet/privy-config";
+
+const identityMode = import.meta.env["VITE_IDENTITY_PROVIDER"];
+const privyAppId = import.meta.env["VITE_PRIVY_APP_ID"] as string | undefined;
+const isPrivyEnabled = identityMode === "privy" && Boolean(privyAppId);
 
 function NotFoundComponent() {
   return (
@@ -109,14 +119,81 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Bridges the Privy access token into the api module. The source uses
+ * `usePrivy().getAccessToken()`, which refreshes the session automatically when
+ * it is about to expire, so a 401 retry re-request produces a fresh token.
+ */
+function ApiTokenBridge() {
+  const { getAccessToken } = usePrivy();
+  useEffect(() => {
+    setApiTokenSource({
+      getToken: () => getAccessToken(),
+      invalidate: async () => {
+        // getAccessToken() already refreshes an expired session; a 401 retry
+        // re-invokes it and therefore receives a fresh token without a custom
+        // force-refresh API.
+      },
+    });
+    return () => setApiTokenSource(null);
+  }, [getAccessToken]);
+  return null;
+}
+
+/**
+ * Redirects to /login when the Privy session is not ready or there is no user,
+ * and rolls an already-authenticated visitor on /login back to the agent screen.
+ */
+function PrivyAuthGate() {
+  const { ready, user } = usePrivy();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  useEffect(() => {
+    if (!ready) return;
+    if (user && pathname === "/login") {
+      void navigate({ to: "/" });
+      return;
+    }
+    if (!user && pathname !== "/login") {
+      void navigate({ to: "/login" });
+    }
+  }, [ready, user, pathname, navigate]);
+
+  if (!ready) return <RoutePending label="Estamos iniciando tu sesión" />;
+  if (!user && pathname !== "/login") return null;
+  return <AppLayout />;
+}
+
+/** Shared app chrome: the active route plus navigation and the toast host. */
+function AppLayout() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  return (
+    <>
+      <Outlet />
+      {pathname === "/login" ? null : <BottomNav />}
+      <Toaster position="top-center" closeButton />
+    </>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
+  if (!isPrivyEnabled) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <AppLayout />
+      </QueryClientProvider>
+    );
+  }
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <Outlet />
-      <BottomNav />
-      <Toaster position="top-center" closeButton />
-    </QueryClientProvider>
+    <PrivyProvider appId={privyAppId as string} config={PRIVY_PROVIDER_CONFIG}>
+      <ApiTokenBridge />
+      <QueryClientProvider client={queryClient}>
+        <PrivyAuthGate />
+      </QueryClientProvider>
+    </PrivyProvider>
   );
 }

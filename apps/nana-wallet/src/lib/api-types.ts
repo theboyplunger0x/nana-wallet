@@ -23,11 +23,15 @@ export type ErrCode =
   | "DUPLICADO"
   | "DEMASIADOS_INTENTOS"
   | "ERROR_INTERNO"
-  | "SERVICIO_CAIDO";
+  | "SERVICIO_CAIDO"
+  | "wallet_not_ready"
+  | "wallet_config_error"
+  | "wallet_unavailable"
+  | "wallet_feature_unavailable";
 
 export type Money = {
   amount: string;
-  currency: "ARS" | "USD";
+  currency: "ARS" | "USD" | "USDC";
   display: string;
 };
 
@@ -40,7 +44,7 @@ export type WalletAccount = {
   subtitle: string;
   balance: Money;
   approxInArs?: Money;
-  kind: "pesos" | "dolares" | "plazo_fijo";
+  kind: "pesos" | "dolares" | "usdc" | "plazo_fijo";
   maturesOn?: ISODate;
 };
 
@@ -66,23 +70,50 @@ export type MovementsPage = {
   nextCursor: string | null;
 };
 
-export type Contact = {
-  id: string;
-  displayName: string;
-  relationship: string;
-  alias: string | null;
-  cbuLast4: string;
-  bankName: string | null;
-  holderName: string;
-  verifiedAt: ISODateTime | null;
-  avatarInitials: string;
+export type WalletBalanceResponse = {
+  network: string;
+  token?: string;
+  address: string;
+  balance: string;
 };
 
-export type CreateContactInput = Omit<Contact, "id" | "verifiedAt">;
+export type WalletHistoryResponse = {
+  network: string;
+  transactions: Array<{
+    hash: string;
+    direction: "in" | "out";
+    counterparty: string;
+    amount: string;
+    token: string;
+    timestamp: string;
+  }>;
+};
 
-export type UpdateContactInput = Partial<CreateContactInput>;
+export type Contact = {
+  id: string;
+  name: string;
+  description: string;
+  address: string;
+  version: number;
+  status: "active" | "inactive";
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+};
 
-export type RevealedCbu = { cbu: string };
+export type CreateContactInput = {
+  name: string;
+  description: string;
+  address: string;
+};
+
+export type UpdateContactInput = {
+  name?: string;
+  description?: string;
+  address?: string;
+  expectedVersion: number;
+};
+
+export type RevealedCbu = { id: string; address: string };
 
 export type AgendaEvent = {
   id: string;
@@ -234,16 +265,9 @@ export type ConversationState = {
   error?: { code: string; message: string };
 };
 
-export type Me = {
-  displayName: string;
-  greetingName: string;
-  initials: string;
-  documentLast3: string;
-  city: string;
-  verifiedAt: ISODateTime | null;
-  verificationHuman: string;
-  dailyLimit: Money;
-  dailySpent: Money;
+export type MeResponse = {
+  userId: string;
+  displayName: string | null;
 };
 
 export type ConfirmableIntent = {
@@ -254,3 +278,86 @@ export type ConfirmableIntent = {
 };
 
 export type EmptyResponse = Record<string, never>;
+
+/** PEW-005: identity != wallet readiness. Mirrors backend walletReadinessStateSchema. */
+export type WalletReadinessState =
+  "unprovisioned" | "provisioning" | "ready" | "recovery_required" | "conflict" | "unavailable";
+
+export type CurrentWalletResponse = {
+  userId: string;
+  state: WalletReadinessState;
+  address: string;
+  chainFamily: string;
+  provider: string;
+};
+
+export type WalletSyncResponse = {
+  userId: string;
+  state: WalletReadinessState;
+  address: string;
+  created: boolean;
+};
+
+/** PEW-013: permission lifecycle is separate from login and payment confirmation. */
+export type PermissionState = "pending" | "active" | "revoking" | "revoked" | "unavailable";
+
+export type WalletPermissionResponse = {
+  userId: string;
+  state: PermissionState;
+  perTransferUsdc: string;
+  rollingTotalUsdc: string;
+  rollingWindowSeconds: number;
+  gasCeiling: string;
+  recipients: string[];
+  aggregateOvershootCaveat: boolean;
+  // PEW-014: rolling-window aggregation is provider-unproven and surfaced as a
+  // hard payment block; optional so older fixtures still parse.
+  aggregationReady?: boolean;
+  aggregateBlockReason?: string;
+};
+
+/** PEW-013: activation returns the read-back-verified permission summary. */
+export type WalletActivationResponse = WalletPermissionResponse;
+
+export type ActivateWalletPermissionInput = {
+  recipients: string[];
+};
+
+/** PEW-014: signer enrollment prepare posts the explicit recipient allowlist. */
+export type EnrollmentPrepareInput = {
+  recipients: string[];
+};
+
+export type EnrollmentPreparationResponse = {
+  walletId: string;
+  walletAddress: string;
+  policyId: string;
+  quorumId: string;
+  perTransferUsdc: string;
+  rollingTotalUsdc: string;
+  windowSeconds: number;
+  aggregationReady: false;
+  aggregateBlockReason: string;
+};
+
+export type EnrollmentCompleteInput = {
+  walletId: string;
+};
+
+export type EnrollmentCompleteResponse = {
+  verified: boolean;
+  state: PermissionState;
+  permission?: WalletPermissionResponse;
+  observed?: {
+    walletOwnerMatches: boolean;
+    policyAttached: boolean;
+    observedPolicyIds: string[];
+    observedSignerIds: string[];
+  };
+};
+
+export type WalletRevokeResponse = {
+  userId: string;
+  state: PermissionState;
+  remote: "revoked" | "unavailable";
+};
