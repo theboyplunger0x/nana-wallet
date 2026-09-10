@@ -17,6 +17,9 @@ export type ErrCode =
   | "SIN_PERMISO"
   | "NO_ENCONTRADO"
   | "DATOS_INVALIDOS"
+  | "INVALID_QUERY"
+  | "WALLET_DATOS_INVALIDOS"
+  | "BALANCE_NO_DISPONIBLE"
   | "SALDO_INSUFICIENTE"
   | "LIMITE_DIARIO"
   | "CONFIRMACION_VENCIDA"
@@ -361,3 +364,39 @@ export type WalletRevokeResponse = {
   state: PermissionState;
   remote: "revoked" | "unavailable";
 };
+
+// wallet-profile (WP-004/WP-005): duplicated manually from the backend
+// balances contract in `src/contracts/http.ts`. The catalog is fixed on the
+// server; the client never selects chain, token or owner.
+export const ARC_TESTNET_CHAIN_ID = 5042002;
+
+export type BalanceAsset = {
+  tokenId: "5042002:0x3600000000000000000000000000000000000000";
+  contract: "0x3600000000000000000000000000000000000000";
+  symbol: "USDC";
+  name: "USD Coin";
+  decimals: 6;
+  balanceAtomic: string;
+};
+
+export type BalancesReadyData = {
+  walletState: "ready";
+  address: string;
+  chainId: 5042002;
+  networkName: "Arc testnet";
+  testnet: true;
+  source: "fixture" | "rpc";
+  observedAt: ISODateTime;
+  assets: [BalanceAsset];
+};
+
+export type BalancesNotReadyData = {
+  walletState: Exclude<WalletReadinessState, "ready">;
+  chainId: 5042002;
+  networkName: "Arc testnet";
+  testnet: true;
+  observedAt: null;
+  assets: [];
+};
+
+export type BalancesData = BalancesReadyData | BalancesNotReadyData;

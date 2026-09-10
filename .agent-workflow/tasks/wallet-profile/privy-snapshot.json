@@ -1,0 +1,500 @@
+{
+  "source": "/private/tmp/nana-privy-specs-20260908",
+  "sourceBranch": "docs/privy-login-embedded-specs",
+  "sourceHead": "e9fcd84429af92e5b4098f5f92d3aa7a861c6bb5",
+  "destinationBranch": "docs/wallet-profile-rpi",
+  "files": [
+    {
+      "path": ".agent-workflow/tasks/local-work-consolidation/archive/observability-research/tests/unit/telemetry-boundary.test.ts.txt",
+      "sha256": "2f3be54dcbbe1592d73d83ea171572ec2c845976facd4541d4f8b754516bbf25"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/00-intake.md",
+      "sha256": "1f4e276c045e75f00e7462ec94edec0d99a58497971291f9e381b9c0c75d1162"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/01-research-questions.md",
+      "sha256": "006f246022cbd2b809333788d1e0548440cb06d3a8dc57d5596277f8c4093321"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/02-research.md",
+      "sha256": "9330f398c36645862ce8c23f4e8f30a402fd1d54ec5ef3180a2f407a567db164"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/03-design-discussion.md",
+      "sha256": "b4d2478524ebfb3656576b16c26a6f45c4131e8461b7373e6b4baf2a37de3b31"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/03a-open-questions.md",
+      "sha256": "c99805ef7902c70d44f8e62f889ebed237951b28bec34f2709dfa5b6f85d6ef7"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/04-structure-outline.md",
+      "sha256": "c4b5c1700b5bd6f2fbda0f5480506878a790cc111bdbd4e5162b66c395831152"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/05-independent-review.md",
+      "sha256": "02e5098ee23d1c71d28000d6e8a1abd466d3c48b30beacc205c9a521bc39de0e"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/06-spec-review-open-questions.md",
+      "sha256": "c9ed65f6c1ee4cd18255ffc69f047030f6a44fe39dbefc4d6a51e9f4ad49444d"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/90-document-review.md",
+      "sha256": "ea40bcdd3d32192918cd315f49eb751dede1cb7028cc29e1589de18e4eb5c6ac"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/development-status.md",
+      "sha256": "4021a17c36387794ca1dec8d7595457820c40e2696eec4df68aa5418dede7801"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/docker-voice-audit.md",
+      "sha256": "873610b5adfd71a53e17b72e2175628b1493b8a72b45ca4ca075fa9373dacf27"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/herdr-session.md",
+      "sha256": "0b77ea155e24cf1c55da6c2bc3c5e8541ebda7acdf2de875001d3f79ef046319"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-embedded-wallets/signer-enrollment-status.md",
+      "sha256": "2d485fa683c17575c6c9a0e9d4e7e3fd770dda698e76a7b564876d4970d73ef5"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-multi-user-foundation/03-design-discussion.md",
+      "sha256": "962c4c9dfff68f96ed8dec794ed93fe2e53d290a2ff21090b99f5051327078e1"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-multi-user-foundation/03a-open-questions.md",
+      "sha256": "f3160a33a3e3edd2825b141c7970a47172b21638fd17a75f53aa868f9d062d98"
+    },
+    {
+      "path": ".agent-workflow/tasks/privy-multi-user-foundation/04-structure-outline.md",
+      "sha256": "a3b3f092ed1f840cabc1530820cd2b8cbc77960ed3e86184613cf58f2a82ea2f"
+    },
+    {
+      "path": ".env.example",
+      "sha256": "5d12d1f596ce4b7d1d1b52f0e37a4f7b6f1b391d4f31ff95bfa5befbf9bcd256"
+    },
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "208f5e3c03a04642ccf81f1e332f44509363153f612ca9f20315c8c5f1eb71ab"
+    },
+    {
+      "path": ".gitleaksignore",
+      "sha256": "18cfeb5b59fa02b320985c2d2dd50647418989189a869ecfbe11eca492ad1bd1"
+    },
+    {
+      "path": "apps/nana-wallet/docker/Dockerfile.privy",
+      "sha256": "80d17aa4a1f818d9ba286c7b5fb692e099eafb138eba2fcf2cd757e085abfbeb"
+    },
+    {
+      "path": "apps/nana-wallet/ios/App/CapApp-SPM/Package.resolved",
+      "sha256": "e04240403f0d011ccef5cf6e14257a52d5abc42eb9550bb73f477d416f0d20f5"
+    },
+    {
+      "path": "apps/nana-wallet/package-lock.json",
+      "sha256": "452512e748faaf017f1c0aba1db915ca0f9d99b6760d91123ca6d1cd9f0f781e"
+    },
+    {
+      "path": "apps/nana-wallet/package.json",
+      "sha256": "2d1341157aa9c42f1af5dbd22186904c4afc4f961a0ace529d524c6d88d739db"
+    },
+    {
+      "path": "apps/nana-wallet/src/client.tsx",
+      "sha256": "69a5f43d03475189d18b982532f4d01b711125e631c467c072e64ca00086f211"
+    },
+    {
+      "path": "apps/nana-wallet/src/features/agent/voice/livekit-web-client.ts",
+      "sha256": "628b1c738a98c7a4887c5b191eae2169d6fe64a41bcbfc61f7cab41726c309b7"
+    },
+    {
+      "path": "apps/nana-wallet/src/features/wallet/PrivySignerEnrollment.tsx",
+      "sha256": "da63a497c1e39acd43e77f2c9aefd2fddcc1269eb44223389e1e717313422905"
+    },
+    {
+      "path": "apps/nana-wallet/src/features/wallet/WalletLifecycle.tsx",
+      "sha256": "6b4a45659aad10987b99c1a851f2769daea08345051dc094d35c329376c23b2a"
+    },
+    {
+      "path": "apps/nana-wallet/src/lib/api-types.ts",
+      "sha256": "6bdc257988de5703b09aa148da60ff6799a9e89585be915acbe7dc50008052d9"
+    },
+    {
+      "path": "apps/nana-wallet/src/lib/api.test.ts",
+      "sha256": "4aa8ad8045fccd39c74fb6e16e602fb6b2c88080a4f69632275cfd2383fbd800"
+    },
+    {
+      "path": "apps/nana-wallet/src/lib/api.ts",
+      "sha256": "17f8ac44c789ff67af6c535b64c97f874c8604c524145ccf7fc4ca73f793cbca"
+    },
+    {
+      "path": "apps/nana-wallet/src/lib/session-isolation.ts",
+      "sha256": "66060ab8124fd6bd9c286e233f5c21c7129b33cb235e64e6830838d7af3375bc"
+    },
+    {
+      "path": "apps/nana-wallet/src/mocks/handlers.ts",
+      "sha256": "3693ca57bfbf5073e2bc055c6dc2e6936ef4396cfed0698a416ac132d302ec88"
+    },
+    {
+      "path": "apps/nana-wallet/src/routeTree.gen.ts",
+      "sha256": "5b355193179683a8b9ad42b42e25ef5cb62254e2e8ae214d2da006508061e492"
+    },
+    {
+      "path": "apps/nana-wallet/src/routes/__root.tsx",
+      "sha256": "6d0cb24a95c9be2df60f8b04a5876913027d044f4355612cd48adcfe76d5fd35"
+    },
+    {
+      "path": "apps/nana-wallet/src/routes/index.tsx",
+      "sha256": "bd6bf14ec7cca3ae0eefc61f4475e398304da1754c7ff1764551420e7bf9b28f"
+    },
+    {
+      "path": "apps/nana-wallet/src/routes/login.tsx",
+      "sha256": "8200d2c9809475fe5a799bb3837d23835f17b402936d91e85f7205b201d2bebd"
+    },
+    {
+      "path": "apps/nana-wallet/src/routes/mi-plata.tsx",
+      "sha256": "17dd5b23d1f8b43f5c3ac7ca19e0a63f6ae9ca628ce4ff83c88dc964aa25c3ca"
+    },
+    {
+      "path": "apps/nana-wallet/src/routes/perfil.tsx",
+      "sha256": "749578c1609fd386326b6892056d5fc84d28640259661780ef0409e33c29459b"
+    },
+    {
+      "path": "compose.privy-local.yaml",
+      "sha256": "db1f13c3089a0cc7d574488cd7450afff11b257d5d73365920a15afcdf1c6283"
+    },
+    {
+      "path": "docker/Dockerfile.privy-livekit",
+      "sha256": "f1dea2f93ffdeb6c38fbe17d3b4f038df9096c2060ce69f931e566302d86b07c"
+    },
+    {
+      "path": "docker/privy-livekit.yaml",
+      "sha256": "e72f66e48081e7db6bb0b52674ec698f18f4a74ae201e1e492c5bd73f38eac79"
+    },
+    {
+      "path": "docs/livekit-development-runbook.md",
+      "sha256": "1b5ed7bd3b2a5cafb2e44468d226bfa5b5a78b5455676217b73bb9ca298966ba"
+    },
+    {
+      "path": "docs/privy-arc-runbook.md",
+      "sha256": "85e5a5e604ac4357ba981810e01541f83a54503583b11ffee76156aa733a2e20"
+    },
+    {
+      "path": "evals/agent/helpers.ts",
+      "sha256": "05a522b63ab19e6c21439224f9511cac5454c51d8ad95608cd8e4cd31cd0c266"
+    },
+    {
+      "path": "evals/agent/scenarios/types.ts",
+      "sha256": "d4005254dce75eb9dc89b08cbfaf04c8033b0fa7a3bd95c72a526fb97cb62d74"
+    },
+    {
+      "path": "evals/voice/realtime/session.ts",
+      "sha256": "b99574ed4dc4b2550e096359b08d56eeae66575aa28c93987fdb943ec3fbbcf9"
+    },
+    {
+      "path": "evals/voice/stt/download-dataset.ts",
+      "sha256": "17c581a09da42ae5c7c468d1bcdf09be5fe6844046b6d4b85527e6716d30b405"
+    },
+    {
+      "path": "evals/voice/stt/providers.ts",
+      "sha256": "84c7acd07b5b5e7f1ba055320d6a6314a252b792c8b71aeba24a63bf375ebc4d"
+    },
+    {
+      "path": "openspec/changes/privy-embedded-wallets/design.md",
+      "sha256": "59d3266eb5c2ef78f957cbe0a1b375537f70a65349810c42b373cbb52ec8e47a"
+    },
+    {
+      "path": "openspec/changes/privy-embedded-wallets/proposal.md",
+      "sha256": "7acf311b0feecd0786a6e4f0ee48915fdb9dba7f6f4535990aeb8c7c3f3eb8d5"
+    },
+    {
+      "path": "openspec/changes/privy-embedded-wallets/specs/privy-embedded-wallets/spec.md",
+      "sha256": "bc38c2900d45700a9332f20a06775cb38bb1a3e980c1cb7df62a87cbe2fbaf94"
+    },
+    {
+      "path": "openspec/changes/privy-embedded-wallets/state.yaml",
+      "sha256": "6423cf967cdb2f1c6ab8c83bd07e6a8278e4bea835ab5e6b7cf5119a2025e993"
+    },
+    {
+      "path": "openspec/changes/privy-embedded-wallets/tasks.md",
+      "sha256": "9282b25fec3c922d0bd0ec6d8566b6548abe83b6f5bcf2dd45a0a4d5d7dac1d0"
+    },
+    {
+      "path": "openspec/changes/privy-multi-user-foundation/design.md",
+      "sha256": "c0b2c03f30b36b255b62d07afdd4625c29515a4eb98b7e26e5ad74424991a5b0"
+    },
+    {
+      "path": "openspec/changes/privy-multi-user-foundation/proposal.md",
+      "sha256": "3c8de2bd97078cf4da5180e91badb960a2b7fe1548e8074da171175d93b40859"
+    },
+    {
+      "path": "openspec/changes/privy-multi-user-foundation/specs/privy-multi-user-foundation/spec.md",
+      "sha256": "5c2481c8470c690dead8233a758a6184ebae92534ddb3a86b8a8dfe1e2d478e8"
+    },
+    {
+      "path": "openspec/changes/privy-multi-user-foundation/specs/recipient-address-memory/spec.md",
+      "sha256": "f877997fb60995be057b67b496a7ac1168ad906aaa6b62d5caceab5160dcd0e5"
+    },
+    {
+      "path": "openspec/changes/privy-multi-user-foundation/state.yaml",
+      "sha256": "920418b66a412d54163c1a862593c7d774ab000c87561a649298dfa9fb371886"
+    },
+    {
+      "path": "openspec/changes/privy-multi-user-foundation/tasks.md",
+      "sha256": "49b342e5d4be4aaade7275809e6f8e6b4be88b1beca77ff038532a80db2ba56f"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "28f0e28824b466942e3990c042a10f9ea155f827e92c69b4c15b0dbf4df143ac"
+    },
+    {
+      "path": "package.json",
+      "sha256": "5d07dc8ea4dc8c5d3c642554caa53bda5a3a9f41c488b4fe324e0ad0e3d32dd6"
+    },
+    {
+      "path": "scripts/privy-docker-voice-smoke.mjs",
+      "sha256": "9f7bd76143fdd93a363095ef2e1964e8a21f499476d3470de266d515e7559497"
+    },
+    {
+      "path": "scripts/privy-live-smoke.mjs",
+      "sha256": "b95bd85a4847da04c5c1fd6a7cf6be59728183be941238da116a3fc38d53106b"
+    },
+    {
+      "path": "scripts/run-browser-e2e.mjs",
+      "sha256": "ef8385c22ea9c1b643bcfb8e632eb4b1a9e8ceb699459a928e1453c3d2c8f690"
+    },
+    {
+      "path": "src/api/contacts.ts",
+      "sha256": "99c458a28b6693da6315e37767667b4c5872e8f36282f3b4a667768adb21f899"
+    },
+    {
+      "path": "src/api/me.ts",
+      "sha256": "46dcfead01a3e59095eb3c0ef36b187e118f15541c5d58b716c5838f6c1ca3ec"
+    },
+    {
+      "path": "src/api/voice.ts",
+      "sha256": "23022828f83d1abbc193fdb69225d5f033cd732e59fc72aeaaf3b9b41df3701d"
+    },
+    {
+      "path": "src/api/wallet.ts",
+      "sha256": "459450817e4b27ca2a8db40f9af23985d8ece7c3cdeecf4105089471760baf6c"
+    },
+    {
+      "path": "src/api/wallets.ts",
+      "sha256": "ba70d05ea6f20152aa8f8fb61fab67d9bc3e8737a83aec1492fed77c9cfba9da"
+    },
+    {
+      "path": "src/auth/demo-sentinel.ts",
+      "sha256": "8f3913e0f9c9791049d3f0e3b03f063a61359ea34b1198ec0f1180798d8fcc80"
+    },
+    {
+      "path": "src/auth/privy-identity.ts",
+      "sha256": "36bf2a1dcb680b79ae2680e2b4de584eca6a7bef5af0b0437cc48e357ccc217f"
+    },
+    {
+      "path": "src/config/env.ts",
+      "sha256": "695883540918e2ad0416ac80dfaac849c1469cdf223af7f5c8c5867c048edbb2"
+    },
+    {
+      "path": "src/config/livekit.ts",
+      "sha256": "8d02e13444e4bdd05352416a99e5f5564b5da2d873ee15faff0fdb96c33962c0"
+    },
+    {
+      "path": "src/config/privy-server.ts",
+      "sha256": "a5ebac199e20ccc0404be92ffdc669ed3a0a1905eb91d4801e0a882282adcce7"
+    },
+    {
+      "path": "src/config/process.ts",
+      "sha256": "1ac66076d3b8ce718d3409187327f28e29b1ace88957b553975e75d1f7798547"
+    },
+    {
+      "path": "src/contracts/http.ts",
+      "sha256": "1bdcf378f8e9bf2f82727cdb4870b4983aaf6b6a4740e40e53168e4d563832e1"
+    },
+    {
+      "path": "src/conversations/service.ts",
+      "sha256": "c6e5759908780de81d2eef335442fb625b09a46777b24dba63b08659129c6c41"
+    },
+    {
+      "path": "src/db/migrations/002_conversations.sql",
+      "sha256": "279fb3a59b726f5196becade1f1af1b80621f12089a588082c81aee15f400900"
+    },
+    {
+      "path": "src/db/migrations/003_conversation_live_leases.sql",
+      "sha256": "407fa10c1a81549bb901812db2a59db8be286c20fc7ca69538ee8c2b35543a62"
+    },
+    {
+      "path": "src/db/migrations/004_users.sql",
+      "sha256": "5dbf92d259397c9a7de170be4d83b2f258dcd3701585bdde8c66079cd6f5d804"
+    },
+    {
+      "path": "src/db/migrations/005_recipient_versions.sql",
+      "sha256": "cefa4c0f1233d589f39b0ff027fccedb5feba89eb3c07d3abe20332721407afc"
+    },
+    {
+      "path": "src/db/migrations/006_embedded_wallets.sql",
+      "sha256": "82c4873a3548dd9446ec300f2a4c15e51e6e405271ec26a3c10be968415227e8"
+    },
+    {
+      "path": "src/livekit/token-issuer.ts",
+      "sha256": "0e618bac761d78458dfbd1139ed14a511a099427bc738d7f2ea0259cd5b49a35"
+    },
+    {
+      "path": "src/livekit/worker.ts",
+      "sha256": "da0913548d1eb2d96aa08cef34412535401e36d0511c43dec7059e56672ae0d7"
+    },
+    {
+      "path": "src/memory/contacts-repository.ts",
+      "sha256": "7d3265760ce193e2f1e04537e97ce7d34ec6b7c01cfcd0f4e79a7ca559879ad4"
+    },
+    {
+      "path": "src/memory/runtime.ts",
+      "sha256": "7c5869eff72e789502ae752b255b114e2ae2fde8e0fc20d29afe3bfd734a1404"
+    },
+    {
+      "path": "src/memory/seed.ts",
+      "sha256": "e63a1a32157a34c5f18c066017ba0b71cb7eac002339774c66140bb2b6bccaed"
+    },
+    {
+      "path": "src/runtime/dependencies.ts",
+      "sha256": "a72b7d01182168beaab2d4b025f712315eac533ca80d986a49522ca959fd5e0d"
+    },
+    {
+      "path": "src/server.ts",
+      "sha256": "9810517e93548c32e111b635e706cbb364855623040c7d4a545fe87df145b208"
+    },
+    {
+      "path": "src/wallet/embedded.ts",
+      "sha256": "73e19b1a7c042b5b19296623854582f155691b0afa00f7aeb34e6bbc3dd85edd"
+    },
+    {
+      "path": "src/wallet/enrollment-policy.ts",
+      "sha256": "dbbabab0236dc7f0b6393f13936098525b9f7f200ecd7275863dcd0ea90c39b1"
+    },
+    {
+      "path": "src/wallet/privy-client.ts",
+      "sha256": "6d665dfa5f30c3fb70894d8f5171c48e48c697b0c680472da7e81a6fb957acd3"
+    },
+    {
+      "path": "src/wallet/privy-server-client.ts",
+      "sha256": "ce6e0c3c59d1d120be2f6c3ce912bb2be5385b8fab6c4e648cb9738337dae580"
+    },
+    {
+      "path": "src/wallet/transfer-pipeline.ts",
+      "sha256": "50b2ad0d47494c51bb11687ae5443b1d55e58059aa36d402996ef4fc6889d3d5"
+    },
+    {
+      "path": "supabase/migrations/20260901000300_users.sql",
+      "sha256": "19fb4e87f845ffcec01bfbbf743a5d04aa95d4f7953354eff3c8ab70ea31197f"
+    },
+    {
+      "path": "supabase/migrations/20260901000400_recipient_versions.sql",
+      "sha256": "f1851a8d5491c415c8516ea6689a1da2d8e58fd819b904dd1e783054868887c3"
+    },
+    {
+      "path": "supabase/migrations/20260901000500_embedded_wallets.sql",
+      "sha256": "d576d60addb539f8009a764722d970699d31389d9a367ef209c299e0b2ce9cd1"
+    },
+    {
+      "path": "tests/fixtures/provision-user.ts",
+      "sha256": "3f91ce4aec6abfaee9d9b9de1e8da6bfa7d5545bc54af84a197830ad4ca94561"
+    },
+    {
+      "path": "tests/integration/api-contacts.test.ts",
+      "sha256": "2e47a10b5da85ded1d9f887f4cb3c667382be913620129e884c81bbbe4fd92e1"
+    },
+    {
+      "path": "tests/integration/api-conversation-resolution.test.ts",
+      "sha256": "366f969f573df4bdb33fd80dc802fea6747cde64a6ccbb5ecd67c3b146b8fe99"
+    },
+    {
+      "path": "tests/integration/api-conversation-service.test.ts",
+      "sha256": "c2cb7dcf11711c1d1859ffdcac9bb700097f1e25f1ef9cfc16aa544954007698"
+    },
+    {
+      "path": "tests/integration/api-me.test.ts",
+      "sha256": "c9020dfc90a5397a0f8c4a896c3419460b7e94e48572c9a70eda86a8e775eefd"
+    },
+    {
+      "path": "tests/integration/api-voice-auth.test.ts",
+      "sha256": "6c91fafe67808271b548f711d76bc009365307055e9b943ae42e64a856016d49"
+    },
+    {
+      "path": "tests/integration/api-wallet-official-wdk.test.ts",
+      "sha256": "1e7cfbefa56269d3b8464a381f552a97e157fac8cbc0c3ac2890ec08ca76eaff"
+    },
+    {
+      "path": "tests/integration/contacts-cross-user.test.ts",
+      "sha256": "5016b02cd54afbd38e61a8a21db57e9c2f4851b41a86d51185a343d7736dc53c"
+    },
+    {
+      "path": "tests/integration/conversation-live-leases.test.ts",
+      "sha256": "55689b76ad424d82b15145159aef168f8ad64ceb6859440be7890b277547653b"
+    },
+    {
+      "path": "tests/integration/conversation-preview-claim-race.test.ts",
+      "sha256": "398449c6c25830f17ea4d63c4342b4e2f9e731891e72860ca545973630742c1f"
+    },
+    {
+      "path": "tests/integration/users-db.test.ts",
+      "sha256": "f70faf49e99677f70267e694bb18082e7b475df6fc52c434667fa559efefacdd"
+    },
+    {
+      "path": "tests/integration/voice-touch-decision-race.test.ts",
+      "sha256": "50b0024ed63d4e919f5ea0b386ae5970e1cc8680839d79ce99fd6207bebad7c0"
+    },
+    {
+      "path": "tests/integration/wallets-cross-user.test.ts",
+      "sha256": "888d7366cdfb00e62301a29262bbba9a7c4f7a4dde5457904c6b39280658d9f2"
+    },
+    {
+      "path": "tests/integration/wallets-enrollment.test.ts",
+      "sha256": "ab8abb8b401eee50e24f6341c0530377d5238181cf426cee1ce21cbd60df53c5"
+    },
+    {
+      "path": "tests/integration/wallets-sync.test.ts",
+      "sha256": "9c649fd4598723a016e6361c3fc72ce923b008cf06f1f9ff6e20f12c25de897f"
+    },
+    {
+      "path": "tests/integration/wallets-transfer.test.ts",
+      "sha256": "6c0e0ca4665d1d4b9887c027b8662385fe26431bb3a857e5afd045fbbefa918a"
+    },
+    {
+      "path": "tests/unit/livekit-config.test.ts",
+      "sha256": "e1698713ec050cf1a534e87bb82da7ef3e5fd62915b805e123a014ee770c1219"
+    },
+    {
+      "path": "tests/unit/memory-runtime-per-user.test.ts",
+      "sha256": "c6a4ae845ae755984f69efb67ab66aedcf1c3b00dc72cf6fcd11201f523a4349"
+    },
+    {
+      "path": "tests/unit/privy-identity.test.ts",
+      "sha256": "7286bc2af8cc4389ba9f9d2411471e8217e25d9770b79c1c3f057c7742fbc042"
+    },
+    {
+      "path": "tests/unit/privy-server-client.test.ts",
+      "sha256": "b4d89ad9842c4d0e2380282f7b97f9ba83b4455a9a0bd49770bd941ca8a227ab"
+    },
+    {
+      "path": "tests/unit/process-config.test.ts",
+      "sha256": "d4c557e151029b50fbd7eb19a76df90e669e19dc1ffa8eb35a71dd8303aea097"
+    },
+    {
+      "path": "tests/unit/redaction.test.ts",
+      "sha256": "b0e75f7209a453979b35d575045cedcc6b811c5061b3e4d62916672dca72eade"
+    },
+    {
+      "path": "tests/unit/telemetry-boundary.test.ts",
+      "sha256": "382492bcd460da7a5b62a1cadead14aed32b97d42c14797f66906a603086e901"
+    },
+    {
+      "path": "tests/unit/wallet-api-normalization.test.ts",
+      "sha256": "42b196f75381d5bacbeddc853b25c98828411b6c1a94c27f0748ceb6ffafa940"
+    },
+    {
+      "path": "tests/unit/wallet-grants.test.ts",
+      "sha256": "00cc4efdd7d1667bd9230929e89e6777b8cb6f98e2b2e6300635ac34fb33f3f0"
+    }
+  ]
+}

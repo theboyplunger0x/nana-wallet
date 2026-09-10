@@ -3,6 +3,7 @@ import {
   api,
   createConversationTurnSender,
   getErrorMessage,
+  queryKeys,
   setApiToken,
   setApiTokenSource,
 } from "@/lib/api";
@@ -442,6 +443,103 @@ describe("wallet permission activation API (PEW-013)", () => {
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(init?.method).toBe("POST");
     expect(String(init?.body)).toContain("0x1111111111111111111111111111111111111111");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("personal balances API (WP-003/WP-004/WP-013)", () => {
+  it("queries the fixed balances route with no parameters and parses the ready envelope", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: {
+          walletState: "ready",
+          address: "0x1111111111111111111111111111111111111111",
+          chainId: 5042002,
+          networkName: "Arc testnet",
+          testnet: true,
+          source: "fixture",
+          observedAt: "2026-09-09T12:00:00.000Z",
+          assets: [
+            {
+              tokenId: "5042002:0x3600000000000000000000000000000000000000",
+              contract: "0x3600000000000000000000000000000000000000",
+              symbol: "USDC",
+              name: "USD Coin",
+              decimals: 6,
+              balanceAtomic: "1250000",
+            },
+          ],
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.getBalances();
+    expect(result.walletState).toBe("ready");
+    if (result.walletState === "ready") {
+      expect(result.assets[0]?.balanceAtomic).toBe("1250000");
+      expect(result.source).toBe("fixture");
+    }
+    const [url] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/v1/wallets/current/balances");
+    expect(String(url)).not.toContain("?");
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces the stable business error codes (WP-007)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse(
+          {
+            ok: false,
+            error: { code: "BALANCE_NO_DISPONIBLE", message: "No pudimos consultar el saldo." },
+          },
+          503,
+        ),
+      ),
+    );
+    await expect(api.getBalances()).rejects.toMatchObject({
+      code: "BALANCE_NO_DISPONIBLE",
+      status: 503,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("scopes the balances cache key per user and chain (WP-013)", () => {
+    expect(queryKeys.balances("user-a", 5042002)).toEqual(["balances", "user-a", 5042002]);
+    expect(queryKeys.balances("user-b", 5042002)).not.toEqual(
+      queryKeys.balances("user-a", 5042002),
+    );
+  });
+});
+
+describe("bodyless requests (contact removal fix)", () => {
+  it("does not set content-type on a DELETE without body", async () => {
+    setApiTokenSource({ getToken: async () => "token-x" });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ ok: true, data: { id: "c1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.deleteContact("c1");
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Content-Type")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps content-type on requests with a body", async () => {
+    setApiTokenSource({ getToken: async () => "token-x" });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ ok: true, data: { id: "c1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.createContact({ name: "A", description: "", address: "0x1" });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
     vi.unstubAllGlobals();
   });
 });

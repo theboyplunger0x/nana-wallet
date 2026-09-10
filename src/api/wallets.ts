@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   activateWalletPermissionInputSchema,
+  balancesDataSchema,
   currentWalletResponseSchema,
   enrollmentCompleteInputSchema,
   enrollmentCompleteResponseSchema,
@@ -9,6 +10,7 @@ import {
   walletPermissionResponseSchema,
   walletRevokeResponseSchema,
   walletSyncResponseSchema,
+  type BalancesData,
   type CurrentWalletResponse,
   type EnrollmentCompleteResponse,
   type EnrollmentPreparationResponse,
@@ -16,6 +18,7 @@ import {
   type WalletRevokeResponse,
   type WalletSyncResponse,
 } from "../contracts/http.js";
+import { WalletBalancesError } from "../wallet/balances.js";
 import {
   GrantNotFoundError,
   GrantValidationError,
@@ -27,10 +30,13 @@ import {
 } from "../wallet/embedded.js";
 import { PrivyIdentityError } from "../auth/privy-identity.js";
 import { TransferRejectedError } from "../wallet/transfer-pipeline.js";
+import type { WalletBalancesService } from "../wallet/balances.js";
 
 export type WalletsRouteDependencies = {
   resolveUserId(request: FastifyRequest): Promise<string>;
   wallet: EmbeddedWalletService;
+  /** Read-only personal balances service (WP-003..WP-009), separate from signing. */
+  balances: WalletBalancesService;
 };
 
 export type WalletApiError = {
@@ -280,6 +286,55 @@ export async function registerWalletsRoutes(
         return { ok: true, data: walletRevokeResponseSchema.parse(result) };
       } catch (error) {
         return errorReply(reply, error);
+      }
+    },
+  );
+
+  // WP-003..WP-007: personal USDC balance. Authenticated, owner-resolved
+  // and read-only: no owner/chain/token selection from query or body, and
+  // private no-store caching on every response shape.
+  app.get(
+    "/v1/wallets/current/balances",
+    async (
+      request: FastifyRequest<{ Body: unknown; Querystring: unknown }>,
+      reply,
+    ): Promise<{ ok: true; data: BalancesData } | WalletApiError> => {
+      reply.header("Cache-Control", "private, no-store");
+      const hasQuery =
+        request.url.includes("?") &&
+        new URL(request.url, "http://localhost").search.length > 1;
+      if (hasQuery || request.body !== undefined) {
+        reply.code(400);
+        return {
+          ok: false,
+          error: {
+            code: "INVALID_QUERY",
+            message: "Esta consulta no acepta parámetros.",
+          },
+        };
+      }
+      try {
+        const userId = await dependencies.resolveUserId(request);
+        const balances = await dependencies.balances.getBalances(userId);
+        return { ok: true, data: balancesDataSchema.parse(balances) };
+      } catch (error) {
+        // Identity failures map to 401 via the server-wide handler.
+        if (error instanceof PrivyIdentityError) throw error;
+        if (error instanceof WalletBalancesError) {
+          reply.code(error.status);
+          return {
+            ok: false,
+            error: { code: error.code, message: error.message },
+          };
+        }
+        reply.code(500);
+        return {
+          ok: false,
+          error: {
+            code: "ERROR_INTERNO",
+            message: "Unexpected balance error.",
+          },
+        };
       }
     },
   );

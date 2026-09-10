@@ -34,6 +34,7 @@ import {
   createContactsEmbedder,
 } from "./api/contacts.js";
 import { ContactsRepository } from "./memory/contacts-repository.js";
+import { EmbeddingService } from "./memory/embedding.js";
 import { FinancialTaskRegistry } from "./conversations/financial-task-registry.js";
 import {
   readApiProcessConfig,
@@ -47,6 +48,11 @@ import {
   EmbeddedWalletService,
   WalletUnavailableError,
 } from "./wallet/embedded.js";
+import {
+  WalletBalancesService,
+  createBalanceReader,
+  readBalanceReadConfig,
+} from "./wallet/balances.js";
 import {
   createPrivyWalletApiClient,
   type PrivyWalletApiClient,
@@ -226,6 +232,19 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
       embedder: createContactsEmbedder(),
     });
 
+    // Contact creation embeds the name through the transformers.js model;
+    // a cold load cost minutes on the first save. Warm it in the background
+    // once the server is listening so the first contact saves fast and
+    // /health is not delayed.
+    const contactsEmbedder = new EmbeddingService(
+      readRecipientMemoryConfig().modelCacheDirectory,
+    );
+    app.addHook("onReady", async () => {
+      void contactsEmbedder.prefetch().catch(() => {
+        // Prefetch is an optimization; the first create loads on demand.
+      });
+    });
+
     // PEW-001..014: user-scoped embedded wallet surface. The fixture Privy
     // client is the default (and the only mode allowed in privy identity
     // mode); the live wallet client fails closed without PRIVY_* credentials.
@@ -238,14 +257,21 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
     const enrollment = privyServerConfig?.keyQuorumId
       ? { keyQuorumId: privyServerConfig.keyQuorumId }
       : undefined;
+    // WP-008: the balances service shares the same own-binding resolver as
+    // the wallet surface but NEVER receives sync/permission/sign methods.
+    const embeddedWallet = new EmbeddedWalletService(
+      database,
+      privyClient,
+      privyServer,
+      enrollment,
+    );
     app.register(registerWalletsRoutes, {
       resolveUserId,
-      wallet: new EmbeddedWalletService(
-        database,
-        privyClient,
-        privyServer,
-        enrollment,
-      ),
+      wallet: embeddedWallet,
+      balances: new WalletBalancesService({
+        resolveWallet: (userId) => embeddedWallet.getCurrentWallet(userId),
+        reader: createBalanceReader(readBalanceReadConfig(process.env)),
+      }),
     });
   } else {
     app.addHook("onClose", async () => {

@@ -308,6 +308,10 @@ export const walletReadinessStateSchema = z.enum([
   "conflict",
   "unavailable",
 ]);
+
+// WP-007: stable business error codes for the personal balance surface.
+export const BALANCE_DATA_INVALID_CODE = "WALLET_DATOS_INVALIDOS";
+export const BALANCE_UNAVAILABLE_CODE = "BALANCE_NO_DISPONIBLE";
 export type WalletReadinessState = z.infer<typeof walletReadinessStateSchema>;
 
 export const currentWalletResponseSchema = z.object({
@@ -419,3 +423,53 @@ export const enrollmentCompleteResponseSchema = z.object({
 export type EnrollmentCompleteResponse = z.infer<
   typeof enrollmentCompleteResponseSchema
 >;
+
+// WP-004..WP-007: personal USDC balance surface. The catalog is closed on
+// the server (Arc testnet, USDC ERC-20 with six decimals); the client can
+// never select chain, token or owner.
+export const ARC_TESTNET_CHAIN_ID = 5042002;
+export const ARC_TESTNET_NETWORK_NAME = "Arc testnet";
+export const USDC_ARC_TESTNET_CONTRACT =
+  "0x3600000000000000000000000000000000000000";
+
+export const balanceAssetSchema = z.object({
+  tokenId: z.literal("5042002:0x3600000000000000000000000000000000000000"),
+  contract: z.literal("0x3600000000000000000000000000000000000000"),
+  symbol: z.literal("USDC"),
+  name: z.literal("USD Coin"),
+  decimals: z.literal(6),
+  balanceAtomic: z
+    .string()
+    .regex(/^(0|[1-9][0-9]*)$/, "canonical decimal uint256 string"),
+});
+export type BalanceAsset = z.infer<typeof balanceAssetSchema>;
+
+export const balancesReadyDataSchema = z.object({
+  walletState: z.literal("ready"),
+  address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  chainId: z.literal(5042002),
+  networkName: z.literal("Arc testnet"),
+  testnet: z.literal(true),
+  source: z.enum(["fixture", "rpc"]),
+  observedAt: z.string(),
+  assets: z.tuple([balanceAssetSchema]),
+});
+export type BalancesReadyData = z.infer<typeof balancesReadyDataSchema>;
+
+// Non-ready variants omit address/source and never report an amount
+// (WP-005): assets is empty and observedAt is null.
+export const balancesNotReadyDataSchema = z.object({
+  walletState: walletReadinessStateSchema.exclude(["ready"]),
+  chainId: z.literal(5042002),
+  networkName: z.literal("Arc testnet"),
+  testnet: z.literal(true),
+  observedAt: z.literal(null),
+  assets: z.tuple([]),
+});
+export type BalancesNotReadyData = z.infer<typeof balancesNotReadyDataSchema>;
+
+export const balancesDataSchema = z.discriminatedUnion("walletState", [
+  balancesReadyDataSchema,
+  balancesNotReadyDataSchema,
+]);
+export type BalancesData = z.infer<typeof balancesDataSchema>;

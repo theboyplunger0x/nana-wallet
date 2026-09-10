@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { api, getErrorMessage, isPrivyIdentityProvider, queryKeys } from "@/lib/api";
+import { AddTrustedRecipient } from "./AddTrustedRecipient";
 import type {
   EnrollmentPreparationResponse,
   PermissionState,
@@ -327,6 +328,17 @@ export function WalletLifecycle({ userId }: { userId: string | undefined }) {
           <p className="mt-2 break-all text-base text-muted-foreground">
             Dirección: {shortenAddress(wallet.address)}
           </p>
+        ) : null}
+        {userId ? (
+          <div className="mt-4 rounded-2xl border border-border bg-card p-4">
+            {/* Trusted recipients feed the activation allowlist (Q3): adding
+            one here refreshes contactsQuery, which handleActivate maps
+            to recipients. */}
+            <AddTrustedRecipient
+              userId={userId}
+              onContactsChanged={() => void contactsQuery.refetch()}
+            />
+          </div>
         ) : null}
         {wallet.state !== "ready" ? (
           <Button

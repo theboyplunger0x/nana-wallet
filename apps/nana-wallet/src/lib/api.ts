@@ -12,6 +12,7 @@ import type {
   CreateContactInput,
   CreateConversationResponse,
   CurrentWalletResponse,
+  BalancesData,
   EndLiveConversationResponse,
   ErrCode,
   MeResponse,
@@ -195,7 +196,12 @@ async function authedFetch(
   const exec = async (token: string): Promise<Response> => {
     const headers = new Headers(options.headers);
     headers.set("Authorization", `Bearer ${token}`);
-    if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    // Only claim a JSON body when one is actually sent: Fastify rejects an
+    // empty body with content-type application/json (bodyless DELETE/GET),
+    // which broke contact removal against the real backend.
+    if (options.body !== undefined && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
     let response: Response;
     try {
@@ -410,6 +416,10 @@ export const api = {
   // separate from permission readiness; these call the authenticated,
   // user-scoped /v1/wallets endpoints.
   getCurrentWallet: () => request<CurrentWalletResponse>("/v1/wallets/current"),
+
+  // WP-003/WP-004: personal USDC balance. No parameters are accepted by the
+  // contract; the server resolves owner, chain and token itself.
+  getBalances: () => request<BalancesData>("/v1/wallets/current/balances"),
 
   syncWallet: () => request<WalletSyncResponse>("/v1/wallets/sync", jsonRequest("POST", {})),
 
@@ -641,6 +651,9 @@ export function confirmMoneyIntent(
 
 export const queryKeys = {
   me: ["me"] as const,
+  // WP-013: personal balances cache is user-scoped with its own "balances"
+  // root, distinct from the legacy wallet summary keys.
+  balances: (userId: string | undefined, chainId: number) => ["balances", userId, chainId] as const,
   wallet: (userId: string | undefined) => ["wallet", "summary", userId] as const,
   movements: (userId: string | undefined) => ["wallet", "movements", userId] as const,
   currentWallet: (userId: string | undefined) => ["wallet", "current", userId] as const,
