@@ -26,11 +26,15 @@ export type ErrCode =
   | "DUPLICADO"
   | "DEMASIADOS_INTENTOS"
   | "ERROR_INTERNO"
-  | "SERVICIO_CAIDO";
+  | "SERVICIO_CAIDO"
+  | "wallet_not_ready"
+  | "wallet_config_error"
+  | "wallet_unavailable"
+  | "wallet_feature_unavailable";
 
 export type Money = {
   amount: string;
-  currency: "ARS" | "USD";
+  currency: "ARS" | "USD" | "USDC";
   display: string;
 };
 
@@ -43,7 +47,7 @@ export type WalletAccount = {
   subtitle: string;
   balance: Money;
   approxInArs?: Money;
-  kind: "pesos" | "dolares" | "plazo_fijo";
+  kind: "pesos" | "dolares" | "usdc" | "plazo_fijo";
   maturesOn?: ISODate;
 };
 
@@ -67,6 +71,25 @@ export type WalletMovement = {
 export type MovementsPage = {
   items: WalletMovement[];
   nextCursor: string | null;
+};
+
+export type WalletBalanceResponse = {
+  network: string;
+  token?: string;
+  address: string;
+  balance: string;
+};
+
+export type WalletHistoryResponse = {
+  network: string;
+  transactions: Array<{
+    hash: string;
+    direction: "in" | "out";
+    counterparty: string;
+    amount: string;
+    token: string;
+    timestamp: string;
+  }>;
 };
 
 export type Contact = {

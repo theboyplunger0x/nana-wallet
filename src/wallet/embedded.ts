@@ -264,7 +264,7 @@ function mapWallet(row: WalletRow): CurrentWallet {
     userId: row.user_id,
     id: row.id,
     state: row.state as WalletReadinessState,
-    address: row.address,
+    address: row.state === "ready" ? row.address : "",
     chainFamily: row.chain_family,
     provider: row.provider,
     verifiedAt: iso(row.verified_at),
@@ -293,6 +293,10 @@ export class EmbeddedWalletService {
     private readonly privyServer?: PrivyServerClient,
     private readonly enrollment?: { keyQuorumId: string },
   ) {}
+
+  private usesUnverifiedLivePolicy(): boolean {
+    return Boolean(this.privyServer) || this.privy.mode === "live";
+  }
 
   private async currentWalletRow(
     userId: string,
@@ -338,113 +342,174 @@ export class EmbeddedWalletService {
     // PEW-014: with a trusted server client configured, sync uses the
     // owner-filtered server list instead of the fixture ownership proof.
     if (this.privyServer) return this.syncWalletLive(userId, opts);
-    const providerWallets = await this.privy.listWallets(userId);
-    const owned: ProviderWallet[] = [];
-    for (const wallet of providerWallets) {
-      const proof = await this.privy.verifyOwnership(userId, {
-        address: wallet.address,
-        providerWalletId: wallet.providerWalletId,
-      });
-      if (proof.ownerVerified) owned.push(wallet);
-    }
+    return this.database.withUserTransaction(userId, async (client) => {
+      await this.lockWalletSync(client, userId);
+      const providerWallets = await this.privy.listWallets(userId);
+      const owned: ProviderWallet[] = [];
+      for (const wallet of providerWallets) {
+        const proof = await this.privy.verifyOwnership(userId, {
+          address: wallet.address,
+          providerWalletId: wallet.providerWalletId,
+        });
+        if (proof.ownerVerified) owned.push(wallet);
+      }
 
-    if (opts.claimedAddress) {
-      const matchesOwned = owned.some(
-        (wallet) => wallet.address === opts.claimedAddress,
-      );
-      if (!matchesOwned)
-        throw new WalletOwnershipError(
-          "Client-supplied address does not match a verified owned wallet.",
+      if (opts.claimedAddress) {
+        const matchesOwned = owned.some(
+          (wallet) => wallet.address === opts.claimedAddress,
         );
-    }
+        if (!matchesOwned)
+          throw new WalletOwnershipError(
+            "Client-supplied address does not match a verified owned wallet.",
+          );
+      }
 
-    const eligible = owned.filter(
-      (wallet) => wallet.chainFamily === "arc" && wallet.state === "ready",
-    );
+      const eligible = owned.filter(
+        (wallet) => wallet.chainFamily === "arc" && wallet.state === "ready",
+      );
+      let created: { created: boolean; address: string };
+      if (eligible.length > 1) {
+        await this.reconcileWalletRows(client, userId, owned, "conflict");
+        created = { created: false, address: eligible[0].address };
+      } else if (eligible.length === 1) {
+        created = await this.upsertReadyWallet(client, userId, eligible[0]);
+      } else if (owned.length > 0) {
+        await this.reconcileWalletRows(client, userId, owned, "unavailable");
+        created = { created: false, address: owned[0].address };
+      } else {
+        created = { created: false, address: "" };
+      }
 
-    const created = await this.database.withUserTransaction(
-      userId,
-      async (client) => {
-        if (eligible.length > 1) {
-          await this.reconcileWalletRows(client, userId, owned, "conflict");
-          return { created: false, address: eligible[0].address };
-        }
-        if (eligible.length === 1) {
-          return this.upsertReadyWallet(client, userId, eligible[0]);
-        }
-        if (owned.length > 0) {
-          await this.reconcileWalletRows(client, userId, owned, "unavailable");
-          return { created: false, address: owned[0].address };
-        }
-        return { created: false, address: "" };
-      },
-    );
-
-    const row = await this.database.withUserTransaction(userId, (client) =>
-      this.currentWalletRow(userId, client),
-    );
-    return {
-      userId,
-      state: (row?.state ??
-        (eligible.length > 1
-          ? "conflict"
-          : "unprovisioned")) as WalletReadinessState,
-      address: row?.address ?? created.address,
-      created: created.created,
-    };
+      const row = await this.currentWalletRow(userId, client);
+      return {
+        userId,
+        state: (row?.state ??
+          (eligible.length > 1
+            ? "conflict"
+            : "unprovisioned")) as WalletReadinessState,
+        address: row?.state === "ready" ? row.address : "",
+        created: created.created,
+      };
+    });
   }
 
   /**
    * PEW-014: owner-verified sync path used when a real Privy server client is
-   * configured. The server response is trusted (owner filter); we never create
-   * a wallet server-side, only bind the surfaced owner wallets.
+   * configured. Privy's authenticated `user_id` filter is the ownership proof;
+   * `owner_id` is a key-quorum id, not the user's DID. We never create a wallet
+   * server-side or bind a browser-provided wallet identity.
    */
   private async syncWalletLive(
     userId: string,
     opts: { claimedAddress?: string } = {},
   ): Promise<WalletSyncResult> {
-    const privyDid = await this.privyDidOf(userId);
-    const records = await this.privyServer!.listWalletsByOwner(privyDid);
-    const owned = records
-      .map(liveRecordToProviderWallet)
-      .filter((wallet) => wallet.address.length > 0);
-
-    if (opts.claimedAddress) {
-      const matchesOwned = owned.some(
-        (wallet) => wallet.address === opts.claimedAddress,
-      );
-      if (!matchesOwned)
-        throw new WalletOwnershipError(
-          "Client-supplied address does not match a verified owned wallet.",
-        );
-    }
-
-    const created = await this.database.withUserTransaction(
+    const outcome = await this.database.withUserTransaction(
       userId,
       async (client) => {
+        // Serialize discovery and reconciliation across every app instance. The
+        // provider request is bounded by PrivyServerClient's timeout, so an older
+        // response cannot commit after a newer sync for the same user.
+        await this.lockWalletSync(client, userId);
+        const identity = await client.query<{ privy_did: string }>(
+          "SELECT privy_did FROM users WHERE id = $1",
+          [userId],
+        );
+        const privyDid = identity.rows[0]?.privy_did;
+        if (!privyDid)
+          throw new WalletOwnershipError(
+            "User identity is not provisioned; cannot verify wallet ownership.",
+          );
+
+        let records: PrivyWalletRecord[];
+        try {
+          records = await this.privyServer!.listWalletsForUser(privyDid);
+        } catch {
+          await this.demoteCurrentWallets(client, userId, "unavailable");
+          return { kind: "unavailable" as const };
+        }
+        const owned = records
+          .filter(
+            (record) =>
+              record.chain_type === "ethereum" &&
+              isValidEvmAddress(record.address),
+          )
+          .map(liveRecordToProviderWallet)
+          .filter((wallet) => wallet.address.length > 0);
+
+        if (opts.claimedAddress) {
+          const matchesOwned = owned.some(
+            (wallet) =>
+              wallet.address.toLowerCase() ===
+              opts.claimedAddress?.toLowerCase(),
+          );
+          if (!matchesOwned)
+            throw new WalletOwnershipError(
+              "Client-supplied address does not match a verified owned wallet.",
+            );
+        }
+
+        let created: { created: boolean; address: string };
         if (owned.length > 1) {
+          await this.demoteCurrentWallets(client, userId, "conflict");
           await this.reconcileWalletRows(client, userId, owned, "conflict");
-          return { created: false, address: owned[0].address };
+          created = { created: false, address: owned[0].address };
+        } else if (owned.length === 1) {
+          // Release the one-ready-per-user/chain slot before a newly discovered
+          // wallet is inserted. This also prevents a stale local selection from
+          // surviving when Privy changes the wallet attributed to the user.
+          await this.demoteCurrentWallets(client, userId, "unavailable");
+          created = await this.upsertReadyWallet(client, userId, owned[0]);
+        } else {
+          // An empty trusted result revokes the evidence behind any cached ready
+          // binding. Keep the row for auditability while failing readiness closed.
+          await this.demoteCurrentWallets(client, userId, "unavailable");
+          created = { created: false, address: "" };
         }
-        if (owned.length === 1) {
-          return this.upsertReadyWallet(client, userId, owned[0]);
-        }
-        return { created: false, address: "" };
+
+        const row = await this.currentWalletRow(userId, client);
+        return {
+          kind: "success" as const,
+          result: {
+            userId,
+            state: (row?.state ??
+              (owned.length > 1
+                ? "conflict"
+                : "unprovisioned")) as WalletReadinessState,
+            address: row?.state === "ready" ? row.address : "",
+            created: created.created,
+          },
+        };
       },
     );
 
-    const row = await this.database.withUserTransaction(userId, (client) =>
-      this.currentWalletRow(userId, client),
+    if (outcome.kind === "unavailable")
+      throw new WalletUnavailableError(
+        "Privy could not verify the user's wallet.",
+      );
+    return outcome.result;
+  }
+
+  private async lockWalletSync(
+    client: Queryable,
+    userId: string,
+  ): Promise<void> {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`nana-wallet-sync:${userId}`],
     );
-    return {
-      userId,
-      state: (row?.state ??
-        (owned.length > 1
-          ? "conflict"
-          : "unprovisioned")) as WalletReadinessState,
-      address: row?.address ?? created.address,
-      created: created.created,
-    };
+  }
+
+  private async demoteCurrentWallets(
+    client: Queryable,
+    userId: string,
+    state: "conflict" | "unavailable",
+  ): Promise<void> {
+    await client.query(
+      `UPDATE user_wallets
+       SET state = $2, verified_at = now(), updated_at = now()
+       WHERE user_id = $1 AND chain_family = 'arc'`,
+      [userId, state],
+    );
   }
 
   private async reconcileWalletRows(
@@ -506,6 +571,11 @@ export class EmbeddedWalletService {
     walletId: string,
     input: GrantInput,
   ): Promise<PermissionSummary> {
+    if (this.usesUnverifiedLivePolicy()) {
+      throw new WalletUnavailableError(
+        "Privy permission activation requires verified user enrollment and policy read-back.",
+      );
+    }
     validateGrantInput(input);
     const grant = await this.database.withUserTransaction(
       userId,
@@ -580,6 +650,11 @@ export class EmbeddedWalletService {
         `Wallet is not ready (state: ${wallet.state}).`,
       );
     }
+    if (this.usesUnverifiedLivePolicy()) {
+      throw new WalletUnavailableError(
+        "Privy permission activation requires verified user enrollment and policy read-back.",
+      );
+    }
     return this.createGrant(userId, wallet.id, defaultGrantInput(recipients));
   }
 
@@ -611,6 +686,13 @@ export class EmbeddedWalletService {
         "Signer enrollment requires a configured Privy server client.",
       );
     }
+
+    // USER DECISION (2026-09-09): enrollment is enabled with the provable
+    // per-transfer policy (chain 5042002 + USDC contract + transfer <= 10 USDC
+    // + recipient allowlist + gas ceiling). The rolling 50 USDC/3600 s
+    // aggregate is NOT in the policy and stays a visible pending feature
+    // (aggregationReady:false) until the provider proves wallet-identity
+    // grouping. The complete-readback still proves ownership + exact policy.
     const input = defaultGrantInput(recipients);
     validateGrantInput(input);
 
@@ -673,11 +755,9 @@ export class EmbeddedWalletService {
 
   /**
    * PEW-014: signer enrollment — complete step. The backing read-back must
-   * prove BOTH that the wallet is owned by the caller (owner == the user's
-   * privy_did) AND that the wallet read-back reflects a signer carrying the
-   * exactly-stored policy id. A client success flag / optimistic state can
-   * NEVER activate: without both proofs the grant stays `pending` and the
-   * observed read-back fields are returned honestly.
+   * prove BOTH that the wallet appears in Privy's trusted `user_id`-filtered
+   * result and that its additional signer carries the exactly-stored override
+   * policy id. A client success flag / optimistic state can NEVER activate.
    */
   public async completePermission(
     userId: string,
@@ -717,15 +797,21 @@ export class EmbeddedWalletService {
     );
     if (!walletRow) throw new WalletNotFoundError();
 
+    // USER DECISION (2026-09-09): the readback below still proves BOTH the
+    // owner (trusted user_id filter) AND the exact stored policy id before
+    // activation; the rolling-hour aggregate simply is not part of the
+    // policy yet (pending feature, surfaced as aggregationReady:false).
+
     const privyDid = await this.privyDidOf(userId);
 
     let serverWallet: PrivyWalletRecord;
     try {
-      serverWallet = await this.privyServer.getWallet(
+      serverWallet = await this.privyServer.getVerifiedWalletForUser(
+        privyDid,
         walletRow.provider_wallet_id,
       );
     } catch (error) {
-      if (error instanceof PrivyServerError) {
+      if (error instanceof PrivyServerError && error.status === 404) {
         // A wallet we cannot read back is NOT proof of attachment.
         return {
           verified: false,
@@ -739,17 +825,20 @@ export class EmbeddedWalletService {
           },
         };
       }
-      throw error;
+      throw new WalletUnavailableError(
+        "Privy could not verify the signer enrollment.",
+      );
     }
 
-    const signers = serverWallet.signers ?? [];
+    const signers = serverWallet.additional_signers;
     const observedPolicyIds = signers.flatMap((signer) =>
       PrivyServerClient.signerPolicyIds(signer),
     );
     const observedSignerIds = signers
       .map((signer) => PrivyServerClient.signerId(signer))
       .filter((value): value is string => Boolean(value));
-    const ownerMatches = serverWallet.owner === privyDid;
+    // Reaching this point proves ownership through the trusted user filter.
+    const ownerMatches = true;
     const matchingSigner = signers.find(
       (signer) =>
         grant.provider_policy_id !== null &&
@@ -832,7 +921,12 @@ export class EmbeddedWalletService {
         return result.rows[0];
       },
     );
-    return mapGrantSummary(userId, row);
+    const summary = mapGrantSummary(userId, row);
+    // USER DECISION (2026-09-09): an active grant (achieved via readback) is
+    // reported honestly as active; the unenforced rolling-hour limit stays
+    // visible through aggregationReady:false / aggregateOvershootCaveat — never
+    // hidden behind a fake 'unavailable' state.
+    return summary;
   }
 
   /** PEW-013: revoke moves active -> revoking -> revoked; provider-unavailable stays 'revoking'. */
@@ -857,6 +951,11 @@ export class EmbeddedWalletService {
     });
 
     try {
+      if (this.privyServer) {
+        throw new Error(
+          "Privy signer removal and trusted read-back are not implemented.",
+        );
+      }
       if (grant.provider_policy_id)
         await this.privy.revokeGrantPolicy(grant.provider_policy_id);
       await this.database.withUserTransaction(userId, async (client) => {

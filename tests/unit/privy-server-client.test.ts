@@ -3,12 +3,29 @@ import {
   PrivyServerClient,
   PrivyServerError,
   type PrivyFetch,
+  type PrivyWalletRecord,
 } from "../../src/wallet/privy-server-client.js";
 
 const APP_ID = "client-id";
 const APP_SECRET = "app-secret-value";
 const BASIC = `Basic ${Buffer.from(`${APP_ID}:${APP_SECRET}`).toString("base64")}`;
 const BASE = "https://api.privy.io/v1";
+
+function walletRecord(
+  id: string,
+  overrides: Partial<PrivyWalletRecord> = {},
+): PrivyWalletRecord {
+  return {
+    id,
+    address: "0x0000000000000000000000000000000000000001",
+    chain_type: "ethereum",
+    policy_ids: [],
+    owner_id: "key-quorum-owner",
+    additional_signers: [],
+    archived_at: null,
+    ...overrides,
+  };
+}
 
 /** Builds a mock Privy response object usable by the client's fetch contract. */
 function mockResponse(
@@ -27,15 +44,72 @@ function mockResponse(
 }
 
 describe("PrivyServerClient (contract-exact HTTP boundary)", () => {
-  it("listWalletsByOwner GETs /wallets?owner=... with privy-app-id + Basic headers", async () => {
+  it("lists all active Ethereum wallets through Privy's trusted user_id filter", async () => {
+    const fetchMock = vi.fn<PrivyFetch>(async (url) =>
+      String(url).includes("cursor=page-2")
+        ? mockResponse({
+            data: [
+              walletRecord("wallet-2"),
+              walletRecord("archived", { archived_at: 123 }),
+            ],
+          })
+        : mockResponse({
+            data: [walletRecord("wallet-1")],
+            next_cursor: "page-2",
+          }),
+    );
+    const client = new PrivyServerClient({
+      appId: APP_ID,
+      appSecret: APP_SECRET,
+      fetch: fetchMock,
+    });
+
+    const wallets = await client.listWalletsForUser("did:privy:user-1");
+    expect(wallets).toHaveLength(2);
+    expect(wallets[0].id).toBe("wallet-1");
+    expect(wallets[1].id).toBe("wallet-2");
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe(
+      `${BASE}/wallets?user_id=did%3Aprivy%3Auser-1&chain_type=ethereum&limit=100`,
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      `${BASE}/wallets?user_id=did%3Aprivy%3Auser-1&chain_type=ethereum&limit=100&cursor=page-2`,
+    );
+    expect(init.method).toBe("GET");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["privy-app-id"]).toBe(APP_ID);
+    expect(headers.Authorization).toBe(BASIC);
+  });
+
+  it("verifies ownership by exact membership in the user-filtered list", async () => {
+    const fetchMock = vi.fn<PrivyFetch>(async () =>
+      mockResponse({ data: [walletRecord("wallet-9")] }),
+    );
+    const client = new PrivyServerClient({
+      appId: APP_ID,
+      appSecret: APP_SECRET,
+      fetch: fetchMock,
+    });
+
+    await expect(
+      client.getVerifiedWalletForUser("did:privy:user-1", "wallet-9"),
+    ).resolves.toMatchObject({ id: "wallet-9", owner_id: "key-quorum-owner" });
+    await expect(
+      client.getVerifiedWalletForUser("did:privy:user-1", "wallet-forged"),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("rejects legacy owner/signers response shapes instead of treating them as ownership evidence", async () => {
     const fetchMock = vi.fn<PrivyFetch>(async () =>
       mockResponse({
         data: [
           {
-            id: "wallet-1",
+            id: "wallet-legacy",
             address: "0x0000000000000000000000000000000000000001",
-            owner: "did:privy:user-1",
             chain_type: "ethereum",
+            owner: "did:privy:user-1",
+            signers: [],
           },
         ],
       }),
@@ -46,25 +120,22 @@ describe("PrivyServerClient (contract-exact HTTP boundary)", () => {
       fetch: fetchMock,
     });
 
-    const wallets = await client.listWalletsByOwner("did:privy:user-1");
-    expect(wallets).toHaveLength(1);
-    expect(wallets[0].id).toBe("wallet-1");
-
-    const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(String(url)).toBe(`${BASE}/wallets?owner=did%3Aprivy%3Auser-1`);
-    expect(init.method).toBe("GET");
-    const headers = init.headers as Record<string, string>;
-    expect(headers["privy-app-id"]).toBe(APP_ID);
-    expect(headers.Authorization).toBe(BASIC);
+    await expect(
+      client.listWalletsForUser("did:privy:user-1"),
+    ).rejects.toMatchObject({
+      status: 502,
+    });
   });
 
   it("getWallet GETs /wallets/:id and returns the record", async () => {
     const fetchMock = vi.fn<PrivyFetch>(async () =>
       mockResponse({
-        id: "wallet-9",
-        address: "0x0000000000000000000000000000000000000009",
-        owner: "did:privy:user-1",
-        signers: [{ signer_id: "signer-1", policy_ids: ["pol_abc"] }],
+        ...walletRecord("wallet-9", {
+          address: "0x0000000000000000000000000000000000000009",
+          additional_signers: [
+            { signer_id: "signer-1", override_policy_ids: ["pol_abc"] },
+          ],
+        }),
       }),
     );
     const client = new PrivyServerClient({
@@ -75,7 +146,7 @@ describe("PrivyServerClient (contract-exact HTTP boundary)", () => {
 
     const wallet = await client.getWallet("wallet-9");
     expect(wallet.id).toBe("wallet-9");
-    expect(wallet.owner).toBe("did:privy:user-1");
+    expect(wallet.owner_id).toBe("key-quorum-owner");
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe(`${BASE}/wallets/wallet-9`);
     expect(init.method).toBe("GET");
@@ -165,5 +236,51 @@ describe("PrivyServerClient (contract-exact HTTP boundary)", () => {
     const error = await client.getWallet("wallet-1").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(PrivyServerError);
     expect((error as PrivyServerError).message).not.toContain("short-secret");
+  });
+
+  it("bounds provider requests with an abort signal", async () => {
+    const fetchMock = vi.fn<PrivyFetch>(
+      async (_url, init) =>
+        new Promise((_, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        }),
+    );
+    const client = new PrivyServerClient({
+      appId: APP_ID,
+      appSecret: APP_SECRET,
+      fetch: fetchMock,
+      requestTimeoutMs: 5,
+    });
+
+    await expect(client.listWalletsForUser("did:privy:user-1")).rejects.toThrow(
+      "aborted",
+    );
+    expect(fetchMock.mock.calls[0]?.[1].signal?.aborted).toBe(true);
+  });
+
+  it("keeps the deadline active while reading the response body", async () => {
+    const fetchMock = vi.fn<PrivyFetch>(async (_url, init) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        new Promise((_, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(new Error("body aborted")),
+          );
+        }),
+    }));
+    const client = new PrivyServerClient({
+      appId: APP_ID,
+      appSecret: APP_SECRET,
+      fetch: fetchMock,
+      requestTimeoutMs: 5,
+    });
+
+    await expect(client.listWalletsForUser("did:privy:user-1")).rejects.toThrow(
+      "body aborted",
+    );
+    expect(fetchMock.mock.calls[0]?.[1].signal?.aborted).toBe(true);
   });
 });

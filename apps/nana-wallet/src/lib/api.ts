@@ -12,6 +12,7 @@ import type {
   CreateContactInput,
   CreateConversationResponse,
   CurrentWalletResponse,
+  BalancesData,
   EndLiveConversationResponse,
   ErrCode,
   MeResponse,
@@ -30,8 +31,9 @@ import type {
   WalletPermissionResponse,
   WalletRevokeResponse,
   WalletSummary,
+  WalletBalanceResponse,
+  WalletHistoryResponse,
   WalletSyncResponse,
-  BalancesData,
   EnrollmentCompleteInput,
   EnrollmentCompleteResponse,
   EnrollmentPrepareInput,
@@ -48,6 +50,17 @@ const TOKEN_STORAGE_KEY = "nana-wallet-token";
  * y solo cae al fallback cuando no hay ninguno.
  */
 export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "wallet_not_ready") {
+      return "Tu billetera de Privy todavía se está preparando. Probá de nuevo en un momento.";
+    }
+    if (error.code === "wallet_feature_unavailable") {
+      return "Esta información de tu billetera todavía no está disponible.";
+    }
+    if (error.code === "wallet_config_error" || error.code === "wallet_unavailable") {
+      return "No pudimos consultar tu billetera de Privy. Probá de nuevo en un momento.";
+    }
+  }
   if (error instanceof Error && error.message) return error.message;
   return FALLBACK_ERROR_MESSAGE;
 }
@@ -301,7 +314,7 @@ async function rawConversationRequest<T>(
   }
 
   if (!response.ok) {
-    const errorBody = body as { status?: unknown; message?: unknown };
+    const errorBody = body as { status?: unknown; message?: unknown; code?: unknown };
     if (
       acceptErrorResponse &&
       response.status < 500 &&
@@ -313,9 +326,11 @@ async function rawConversationRequest<T>(
     throw new ApiError(
       isUnauthorized(response.status)
         ? "NO_AUTORIZADO"
-        : response.status >= 500
-          ? "ERROR_INTERNO"
-          : "DATOS_INVALIDOS",
+        : typeof errorBody.code === "string"
+          ? (errorBody.code as ErrCode)
+          : response.status >= 500
+            ? "ERROR_INTERNO"
+            : "DATOS_INVALIDOS",
       typeof errorBody.message === "string" ? errorBody.message : FALLBACK_ERROR_MESSAGE,
       { status: response.status, ambiguous: response.status >= 500 },
     );
@@ -332,9 +347,60 @@ function jsonRequest(method: "POST" | "PATCH" | "DELETE", body?: unknown): Reque
 }
 
 export const api = {
-  getWalletSummary: () => request<WalletSummary>("/v1/wallet/summary"),
+  getWalletSummary: async (): Promise<WalletSummary> => {
+    if (!isPrivyIdentityProvider()) {
+      return request<WalletSummary>("/v1/wallet/summary");
+    }
+    const balance = await rawConversationRequest<WalletBalanceResponse>(
+      "/v1/wallet/balance?network=arc-testnet&token=USDC",
+      {},
+    );
+    const money = {
+      amount: balance.balance,
+      currency: "USDC" as const,
+      display: `${balance.balance} USDC`,
+    };
+    return {
+      total: money,
+      accounts: [
+        {
+          id: balance.address,
+          name: "USDC en Arc Testnet",
+          subtitle: balance.address,
+          balance: money,
+          kind: "usdc",
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+  },
 
-  getMovements: (params: { cursor?: string; limit?: number } = {}) => {
+  getMovements: async (params: { cursor?: string; limit?: number } = {}) => {
+    if (isPrivyIdentityProvider()) {
+      const history = await rawConversationRequest<WalletHistoryResponse>(
+        "/v1/wallet/history?network=arc-testnet&token=USDC",
+        {},
+      );
+      const offset = Number(params.cursor ?? "0");
+      const limit = params.limit ?? 20;
+      const selected = history.transactions.slice(offset, offset + limit);
+      const nextOffset = offset + selected.length;
+      return {
+        items: selected.map((transaction) => ({
+          id: transaction.hash,
+          kind: transaction.direction === "in" ? ("entrada" as const) : ("salida" as const),
+          title: transaction.direction === "in" ? "Recibiste USDC" : "Enviaste USDC",
+          subtitle: transaction.counterparty,
+          amount: {
+            amount: transaction.amount,
+            currency: "USDC" as const,
+            display: `${transaction.amount} ${transaction.token}`,
+          },
+          at: transaction.timestamp,
+        })),
+        nextCursor: nextOffset < history.transactions.length ? String(nextOffset) : null,
+      } satisfies MovementsPage;
+    }
     const search = new URLSearchParams();
     if (params.cursor) search.set("cursor", params.cursor);
     search.set("limit", String(params.limit ?? 20));

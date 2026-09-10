@@ -252,12 +252,20 @@ function verifySignedPayload(signedTx: string, expected: SigningIntent): void {
  * and receipt verification. Reconciliation (F6) reuses identical persisted bytes
  * or re-signs the IDENTICAL intent — never a new nonce or fee bump.
  */
+// Fixture-only until durable real transport and receipt reconciliation are integrated.
 export class WalletTransferPipeline {
   public constructor(
     private readonly database: DatabaseClient,
     private readonly privy: PrivyWalletApiClient,
     private readonly faults: PipelineFaultOptions = {},
-  ) {}
+  ) {
+    if (privy.mode !== "fixture") {
+      throw new TransferRejectedError(
+        "live_transport_unavailable",
+        "This pipeline simulates dispatch and receipts and cannot execute live wallet transfers.",
+      );
+    }
+  }
 
   private namespacedKey(userId: string, key: string): string {
     if (key.includes(":"))

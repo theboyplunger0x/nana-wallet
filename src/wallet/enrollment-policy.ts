@@ -24,9 +24,13 @@ import {
  * rule by reading the policy back (complete-readback), never by assuming the
  * JSON was stored verbatim. Do not ship live signing on trust of this shape.
  *
- * READINESS GATE (parent-controlled): rolling-window 50 USDC/3600s aggregation
- * stays BLOCKED until wallet-identity group_by is proven. No aggregation resource
- * or aggregation condition is created here — only per-transfer cap and allowlist.
+ * READINESS SCOPE (user decision 2026-09-09): enrollment is enabled with the
+ * provable per-transfer policy below (chain + USDC contract + transfer cap +
+ * recipient allowlist + gas ceiling). The rolling 50 USDC/3600s aggregate is a
+ * PENDING FEATURE: no aggregation resource or condition is created, the limit
+ * is NOT enforced, and the gap is surfaced honestly via aggregationReady:false
+ * / aggregateOvershootCaveat — never hidden. Activating it requires the parent
+ * to prove wallet-identity grouping with the provider.
  */
 
 export const ENROLLMENT_PER_TRANSFER_USDC = PER_TRANSFER_USDC; // "10"
@@ -36,7 +40,7 @@ export const ENROLLMENT_GAS_CEILING = DEFAULT_GAS_CEILING; // "0.001"
 export const ENROLLMENT_USDC_CONTRACT = ARC_USDC_ERC20;
 export const ENROLLMENT_CHAIN_ID = ARC_TESTNET_CHAIN_ID;
 
-/** Parent-gate block reason for the rolling aggregation (NOT implemented yet). */
+/** Pending-feature reason for the rolling aggregation (NOT enforced yet; user-authorized scope). */
 export const AGGREGATION_BLOCK_REASON =
   "provider per-wallet aggregation scope unproven (group_by only supports request fields; wallet identity not documented)";
 

@@ -18,6 +18,7 @@ import { BottomNav } from "../components/BottomNav";
 import { RoutePending } from "../components/RouteStates";
 import { Button } from "../components/ui/button";
 import { Toaster } from "../components/ui/sonner";
+import { PRIVY_PROVIDER_CONFIG } from "../features/wallet/privy-config";
 
 const identityMode = import.meta.env["VITE_IDENTITY_PROVIDER"];
 const privyAppId = import.meta.env["VITE_PRIVY_APP_ID"] as string | undefined;
@@ -188,7 +189,7 @@ function RootComponent() {
   }
 
   return (
-    <PrivyProvider appId={privyAppId as string} config={{ loginMethods: ["email", "sms"] }}>
+    <PrivyProvider appId={privyAppId as string} config={PRIVY_PROVIDER_CONFIG}>
       <ApiTokenBridge />
       <QueryClientProvider client={queryClient}>
         <PrivyAuthGate />

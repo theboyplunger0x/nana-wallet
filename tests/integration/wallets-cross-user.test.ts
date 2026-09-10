@@ -12,6 +12,10 @@ import {
 } from "../../src/wallet/embedded.js";
 import { createPrivyWalletApiClient } from "../../src/wallet/privy-client.js";
 import {
+  PrivyServerClient,
+  type PrivyFetch,
+} from "../../src/wallet/privy-server-client.js";
+import {
   TransferUncertainError,
   WalletTransferPipeline,
 } from "../../src/wallet/transfer-pipeline.js";
@@ -44,6 +48,42 @@ async function tokenFor(did: string): Promise<string> {
 
 const DID_A = "did:privy:wallet-cross-a";
 const DID_B = "did:privy:wallet-cross-b";
+const ADDRESS_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const ADDRESS_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+function userScopedPrivyServer(): PrivyServerClient {
+  const fetchMock: PrivyFetch = async (rawUrl) => {
+    const url = new URL(rawUrl);
+    const did = url.searchParams.get("user_id");
+    const address =
+      did === DID_A ? ADDRESS_A : did === DID_B ? ADDRESS_B : null;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: address
+          ? [
+              {
+                id: `wallet-${did === DID_A ? "a" : "b"}`,
+                address,
+                chain_type: "ethereum",
+                policy_ids: [],
+                owner_id: `owner-${did === DID_A ? "a" : "b"}`,
+                additional_signers: [],
+                archived_at: null,
+              },
+            ]
+          : [],
+      }),
+    };
+  };
+  return new PrivyServerClient({
+    appId: "test-wallet-cross-app",
+    appSecret: "test-secret-never-logged",
+    baseUrl: "https://mock.privy.test/v1",
+    fetch: fetchMock,
+  });
+}
 
 suite("embedded wallet cross-user isolation (PEW-004/003)", () => {
   let database: DatabaseClient;
@@ -74,7 +114,7 @@ suite("embedded wallet cross-user isolation (PEW-004/003)", () => {
   it("never lets A read or reconcile B wallet, grant or operation data", {
     timeout: 60_000,
   }, async () => {
-    const app = buildServer();
+    const app = buildServer({ privyServer: userScopedPrivyServer() });
     try {
       const authA = { authorization: `Bearer ${await tokenFor(DID_A)}` };
       const authB = { authorization: `Bearer ${await tokenFor(DID_B)}` };
@@ -141,13 +181,16 @@ suite("embedded wallet cross-user isolation (PEW-004/003)", () => {
       expect(JSON.stringify(permB.json())).not.toContain(grantA.grantId!);
       expect(JSON.stringify(permB.json())).not.toContain(RECIPIENT);
 
-      // A's own permission shows the grant; B's does not.
+      // USER DECISION (2026-09-09): A's own active grant is reported honestly
+      // (the unenforced hourly limit stays visible via aggregationReady:false);
+      // its user-scoped details still never leak to B.
       const permA = await app.inject({
         method: "GET",
         url: "/v1/wallets/current/permission",
         headers: authA,
       });
       expect(permA.json().data.state).toBe("active");
+      expect(permA.json().data.aggregationReady).toBe(false);
       expect(permA.json().data.recipients).toContain(RECIPIENT);
 
       // Operation isolation: B cannot read or reconcile A's operation.

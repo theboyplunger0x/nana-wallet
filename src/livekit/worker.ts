@@ -29,6 +29,7 @@ import {
   createWorkerDependencies,
   type WorkerDependencies,
 } from "../runtime/dependencies.js";
+import { bindWalletForUser } from "../wallet/privy-user-provider.js";
 
 export { readLiveKitWorkerConfig } from "../config/process.js";
 export type { LiveKitWorkerConfig } from "../config/process.js";
@@ -84,6 +85,9 @@ async function runJob(
     conversation: roomConversation,
     startSession: async (binding) => {
       const memoryService = getConfiguredRecipientMemoryService();
+      const wallet = dependencies.walletForUser
+        ? bindWalletForUser(dependencies.walletForUser, binding.userId)
+        : dependencies.wallet;
       // REVIEW FIX V3 (voice path): the voice service is built per binding so its
       // recipient memory runtime scopes to `binding.sub` — never the demo tenant.
       // It shares the repository, wallet, and financialTasks with the worker so all
@@ -91,7 +95,7 @@ async function runJob(
       // claim and emit revisions through the same frontend data topic.
       const voiceService = createWalletConversationService({
         conversations: dependencies.conversations,
-        wallet: dependencies.wallet,
+        wallet,
         ...(memoryService
           ? { memory: { userId: binding.userId, service: memoryService } }
           : {}),
@@ -101,7 +105,7 @@ async function runJob(
       const tools = createRealtimeTools({
         conversationId: binding.conversationId,
         userId: binding.userId,
-        wallet: dependencies.wallet,
+        wallet,
         service: voiceService,
         conversations: dependencies.conversations,
         ...(memoryService ? { recipientMemory: memoryService } : {}),

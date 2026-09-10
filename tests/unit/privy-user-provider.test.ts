@@ -1,0 +1,263 @@
+import { describe, expect, it, vi } from "vitest";
+import type { DatabaseClient } from "../../src/db/client.js";
+import { PrivyServerClient } from "../../src/wallet/privy-server-client.js";
+import {
+  PRIVY_ARC_CHAIN_ID,
+  PRIVY_ARC_USDC,
+  PrivyUserWalletProvider,
+  PrivyWalletRuntimeError,
+  bindWalletForUser,
+  createPrivyWalletForUserResolver,
+} from "../../src/wallet/privy-user-provider.js";
+
+const USER_A = "11111111-1111-4111-8111-111111111111";
+const USER_B = "22222222-2222-4222-8222-222222222222";
+const ADDRESS_A = "0x1111111111111111111111111111111111111111";
+const ADDRESS_B = "0x2222222222222222222222222222222222222222";
+
+function wallet(id: string, address: string) {
+  return {
+    id,
+    address,
+    chain_type: "ethereum",
+    policy_ids: [],
+    owner_id: null,
+    additional_signers: [],
+    archived_at: null,
+  };
+}
+
+function databaseFixture(
+  rows: Record<
+    string,
+    {
+      privy_did: string;
+      provider_wallet_id: string | null;
+      address: string | null;
+    }
+  >,
+): DatabaseClient {
+  return {
+    async withUserTransaction(userId: string, operation: (client: unknown) => Promise<unknown>) {
+      return operation({
+        query: async () => ({ rows: rows[userId] ? [rows[userId]] : [] }),
+      });
+    },
+  } as unknown as DatabaseClient;
+}
+
+function privyFixture(walletsByDid: Record<string, ReturnType<typeof wallet>[]>) {
+  return new PrivyServerClient({
+    appId: "app-test",
+    appSecret: "secret-test",
+    fetch: vi.fn(async (url) => {
+      const did = new URL(url).searchParams.get("user_id") ?? "";
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: walletsByDid[did] ?? [] }),
+      };
+    }),
+  });
+}
+
+describe("Privy per-user wallet runtime", () => {
+  it("selects the wallet from Privy's trusted user filter for each user", async () => {
+    const database = databaseFixture({
+      [USER_A]: {
+        privy_did: "did:privy:user-a",
+        provider_wallet_id: null,
+        address: null,
+      },
+      [USER_B]: {
+        privy_did: "did:privy:user-b",
+        provider_wallet_id: null,
+        address: null,
+      },
+    });
+    const resolve = createPrivyWalletForUserResolver({
+      database,
+      privy: privyFixture({
+        "did:privy:user-a": [wallet("wallet-a", ADDRESS_A)],
+        "did:privy:user-b": [wallet("wallet-b", ADDRESS_B)],
+      }),
+      rpc: vi.fn(),
+    });
+
+    await expect(
+      (await resolve(USER_A)).getAddress({
+        network: "arc-testnet",
+        wallet: USER_A,
+      }),
+    ).resolves.toMatchObject({ address: ADDRESS_A });
+    await expect(
+      (await resolve(USER_B)).getAddress({
+        network: "arc-testnet",
+        wallet: USER_B,
+      }),
+    ).resolves.toMatchObject({ address: ADDRESS_B });
+  });
+
+  it("fails explicitly when there is no wallet or no verified selection among multiple wallets", async () => {
+    const database = databaseFixture({
+      [USER_A]: {
+        privy_did: "did:privy:user-a",
+        provider_wallet_id: null,
+        address: null,
+      },
+    });
+    const none = createPrivyWalletForUserResolver({
+      database,
+      privy: privyFixture({ "did:privy:user-a": [] }),
+    });
+    const multiple = createPrivyWalletForUserResolver({
+      database,
+      privy: privyFixture({
+        "did:privy:user-a": [
+          wallet("wallet-a", ADDRESS_A),
+          wallet("wallet-b", ADDRESS_B),
+        ],
+      }),
+    });
+
+    await expect(none(USER_A)).rejects.toMatchObject({
+      code: "wallet_not_ready",
+    });
+    await expect(multiple(USER_A)).rejects.toMatchObject({
+      code: "wallet_not_ready",
+    });
+  });
+
+  it("rejects multiple wallets even when an older auto-synced binding is ready", async () => {
+    const database = databaseFixture({
+      [USER_A]: {
+        privy_did: "did:privy:user-a",
+        provider_wallet_id: "wallet-b",
+        address: ADDRESS_B,
+      },
+    });
+    const resolve = createPrivyWalletForUserResolver({
+      database,
+      privy: privyFixture({
+        "did:privy:user-a": [
+          wallet("wallet-a", ADDRESS_A),
+          wallet("wallet-b", ADDRESS_B),
+        ],
+      }),
+    });
+
+    await expect(resolve(USER_A)).rejects.toMatchObject({
+      code: "wallet_not_ready",
+    });
+  });
+
+  it("reads the selected address USDC balance from Arc with six decimals", async () => {
+    const calls: Array<{ method: string; params?: unknown[] }> = [];
+    const provider = new PrivyUserWalletProvider(
+      { id: "wallet-a", address: ADDRESS_A },
+      {
+        rpc: async (method, params) => {
+          calls.push({ method, params });
+          if (method === "eth_chainId")
+            return `0x${PRIVY_ARC_CHAIN_ID.toString(16)}`;
+          if (
+            method === "eth_call" &&
+            (params?.[0] as { data?: string } | undefined)?.data ===
+              "0x313ce567"
+          )
+            return "0x6";
+          if (method === "eth_call") return "0x0288cdc0";
+          throw new Error("unexpected RPC method");
+        },
+      },
+    );
+
+    await expect(
+      provider.getBalance({
+        network: "arc-testnet",
+        token: "USDC",
+        wallet: USER_A,
+      }),
+    ).resolves.toEqual({
+      network: "arc-testnet",
+      token: "USDC",
+      address: ADDRESS_A,
+      balance: "42.52",
+    });
+    expect(calls[1]).toMatchObject({
+      method: "eth_call",
+      params: [{ to: PRIVY_ARC_USDC, data: "0x313ce567" }, "latest"],
+    });
+    expect(calls[2]).toMatchObject({
+      method: "eth_call",
+      params: [
+        {
+          to: PRIVY_ARC_USDC,
+          data: `0x70a08231${ADDRESS_A.slice(2).padStart(64, "0")}`,
+        },
+        "latest",
+      ],
+    });
+  });
+
+  it("rejects a configured token contract whose decimals do not match Arc USDC", async () => {
+    const provider = new PrivyUserWalletProvider(
+      { id: "wallet-a", address: ADDRESS_A },
+      {
+        rpc: async (method) =>
+          method === "eth_chainId"
+            ? `0x${PRIVY_ARC_CHAIN_ID.toString(16)}`
+            : "0x12",
+      },
+    );
+
+    await expect(
+      provider.getBalance({
+        network: "arc-testnet",
+        token: "USDC",
+        wallet: USER_A,
+      }),
+    ).rejects.toMatchObject({ code: "wallet_config_error" });
+  });
+
+  it("keeps discovery lazy so walletless users can enter a conversation", async () => {
+    const resolve = vi.fn(async () => {
+      throw new PrivyWalletRuntimeError(
+        "wallet_not_ready",
+        "No wallet for this user.",
+      );
+    });
+    const scoped = bindWalletForUser(resolve, USER_A);
+
+    expect(resolve).not.toHaveBeenCalled();
+    await expect(
+      scoped.getBalance({
+        network: "arc-testnet",
+        token: "USDC",
+        wallet: USER_A,
+      }),
+    ).rejects.toMatchObject({ code: "wallet_not_ready" });
+    expect(resolve).toHaveBeenCalledWith(USER_A);
+  });
+
+  it("never previews or dispatches while provider policy limits are unproven", async () => {
+    const provider = new PrivyUserWalletProvider({
+      id: "wallet-a",
+      address: ADDRESS_A,
+    });
+    const request = {
+      network: "arc-testnet",
+      token: "USDC",
+      to: ADDRESS_B,
+      amount: "1",
+      wallet: USER_A,
+    };
+
+    await expect(provider.previewTransfer(request)).rejects.toMatchObject({
+      code: "wallet_unavailable",
+    });
+    await expect(provider.broadcastTransfer(request)).resolves.toMatchObject({
+      kind: "not_dispatched",
+    });
+  });
+});

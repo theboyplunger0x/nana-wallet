@@ -19,6 +19,11 @@ const PrivySignerEnrollment = lazy(() =>
     default: module.PrivySignerEnrollment,
   })),
 );
+const PrivyWalletSync = lazy(() =>
+  import("./PrivyWalletSync").then((module) => ({
+    default: module.PrivyWalletSync,
+  })),
+);
 
 /**
  * PEW-005: wallet readiness and permission readiness are two separate concerns.
@@ -49,6 +54,13 @@ const PERMISSION_STATE_LABELS: Record<PermissionState, string> = {
 /** The documented provider aggregate-overshoot limitation. Shown, never hidden. */
 const OVERSHOOT_CAVEAT =
   "El proveedor no descuenta de forma atómica: pagos concurrentes podrían exceder momentáneamente el tope por hora.";
+
+/**
+ * USER DECISION (2026-09-09): payments are enabled with the per-transfer cap;
+ * the rolling 50 USDC/hour aggregate is a PENDING FEATURE — shown, never hidden.
+ */
+const HOURLY_LIMIT_PENDING =
+  "El límite de 50 USDC por hora todavía no está activo en el proveedor. Sí están activos el tope por transferencia (10 USDC), la lista de destinatarios autorizados y el tope de gas. Lo vas a ver como pendiente hasta que se pruebe la configuración por wallet.";
 
 const toneClasses: Record<WalletStateTone, string> = {
   neutral: "bg-secondary text-secondary-foreground",
@@ -117,6 +129,7 @@ export function WalletLifecycle({ userId }: { userId: string | undefined }) {
   const enabled = Boolean(userId);
   const privy = isPrivyIdentityProvider();
   const [isActivating, setIsActivating] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const [preparation, setPreparation] = useState<EnrollmentPreparationResponse | null>(null);
@@ -138,6 +151,23 @@ export function WalletLifecycle({ userId }: { userId: string | undefined }) {
     queryFn: api.getContacts,
     enabled,
   });
+
+  async function handleSync() {
+    setIsSyncing(true);
+    setPermissionMessage(null);
+    try {
+      await api.syncWallet();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.currentWallet(userId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.wallet(userId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.movements(userId) }),
+      ]);
+    } catch (error) {
+      setPermissionMessage(getErrorMessage(error));
+    } finally {
+      setIsSyncing(false);
+    }
+  }
 
   if (!enabled || walletQuery.isPending || permissionQuery.isPending) {
     return (
@@ -273,12 +303,16 @@ export function WalletLifecycle({ userId }: { userId: string | undefined }) {
 
   const canActivate =
     wallet.state === "ready" &&
-    (permission.state === "pending" ||
-      permission.state === "unavailable" ||
-      permission.state === "revoked");
+    (permission.state === "pending" || permission.state === "unavailable") &&
+    !privy;
 
   return (
     <section className="surface-card mt-10 p-5" aria-label="Tu billetera y el permiso de pagos">
+      {privy && userId ? (
+        <Suspense fallback={null}>
+          <PrivyWalletSync userId={userId} />
+        </Suspense>
+      ) : null}
       <div className="flex items-center gap-2">
         <Wallet className="size-7 text-brand-ink" strokeWidth={2.4} aria-hidden="true" />
         <h2 className="text-xl font-extrabold">Tu billetera y el permiso de pagos</h2>
@@ -299,10 +333,10 @@ export function WalletLifecycle({ userId }: { userId: string | undefined }) {
             type="button"
             variant="outline"
             className="press mt-4 min-h-12 w-full text-base font-extrabold"
-            onClick={() => void handleActivate()}
-            disabled={isActivating}
+            onClick={() => void handleSync()}
+            disabled={isSyncing}
           >
-            {isActivating ? (
+            {isSyncing ? (
               <Loader2 className="size-5 animate-spin" aria-hidden="true" />
             ) : (
               <Wallet className="size-5" aria-hidden="true" />
@@ -361,6 +395,14 @@ export function WalletLifecycle({ userId }: { userId: string | undefined }) {
             {permission.aggregateOvershootCaveat ? (
               <p className="mt-4 rounded-2xl border border-border bg-card p-4 text-sm leading-snug text-muted-foreground">
                 {OVERSHOOT_CAVEAT}
+              </p>
+            ) : null}
+            {permission.aggregationReady === false ? (
+              <p
+                className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-snug text-amber-900"
+                role="status"
+              >
+                {HOURLY_LIMIT_PENDING}
               </p>
             ) : null}
 

@@ -43,15 +43,19 @@ async function provisionUser(
  */
 function enrollWallet(
   policyId: string,
-  owner = DID,
+  ownerId = "owner-key-quorum",
   id = `provider-wallet-${randomUUID()}`,
 ): PrivyWalletRecord {
   return {
     id,
     address: "0x0000000000000000000000000000000000000001",
-    owner,
     chain_type: "ethereum",
-    signers: [{ signer_id: "auth-signer-1", policy_ids: [policyId] }],
+    policy_ids: [],
+    owner_id: ownerId,
+    additional_signers: [
+      { signer_id: "auth-signer-1", override_policy_ids: [policyId] },
+    ],
+    archived_at: null,
   };
 }
 
@@ -78,20 +82,22 @@ function mockResponse(
 function mockServerClient(options: {
   policyId?: string;
   list?: PrivyWalletRecord[];
-  wallet?: PrivyWalletRecord;
+  lists?: PrivyWalletRecord[][];
+  listStatuses?: number[];
 }): { client: PrivyServerClient; fetchMock: ReturnType<typeof vi.fn> } {
+  let listCall = 0;
   const fetchMock = vi.fn<PrivyFetch>(async (url) => {
     const method = url.startsWith(`${BASE}/policies`) ? "POST" : "GET";
     if (method === "POST") {
       return mockResponse({ id: options.policyId ?? "pol_1" });
     }
-    if (url.includes("/wallets?owner=")) {
-      return mockResponse({ data: options.list ?? [] });
-    }
-    if (url.includes("/wallets/")) {
-      const wallet = options.wallet;
-      if (!wallet) return mockResponse({ error: "not_found" }, 404);
-      return mockResponse(wallet);
+    if (url.includes("/wallets?user_id=")) {
+      const status = options.listStatuses?.[listCall] ?? 200;
+      const configured = options.lists?.[listCall] ?? options.list ?? [];
+      listCall += 1;
+      return status >= 400
+        ? mockResponse({ error: "wallet_provider_unavailable" }, status)
+        : mockResponse({ data: configured });
     }
     return mockResponse({ error: "not_found" }, 404);
   });
@@ -196,6 +202,186 @@ suite(
       expect(second.address).toBe(first.address);
     });
 
+    it("demotes a stale ready binding when Privy no longer attributes a wallet to the user", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:removed-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const wallet = enrollWallet("pol_ignored");
+      const { client } = mockServerClient({ lists: [[wallet], []] });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+
+      expect((await service.syncWallet(userId)).state).toBe("ready");
+      const removed = await service.syncWallet(userId);
+      expect(removed).toMatchObject({ state: "unavailable", address: "" });
+      await expect(service.getCurrentWallet(userId)).resolves.toMatchObject({
+        state: "unavailable",
+        address: "",
+      });
+    });
+
+    it("demotes cached readiness when Privy cannot verify ownership", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:sync-outage-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const wallet = enrollWallet("pol_ignored");
+      const { client } = mockServerClient({
+        lists: [[wallet], [wallet]],
+        listStatuses: [200, 503],
+      });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+
+      expect((await service.syncWallet(userId)).state).toBe("ready");
+      await expect(service.syncWallet(userId)).rejects.toBeInstanceOf(
+        WalletUnavailableError,
+      );
+      await expect(service.getCurrentWallet(userId)).resolves.toMatchObject({
+        state: "unavailable",
+        address: "",
+      });
+    });
+
+    it("serializes concurrent syncs so an older failure cannot overwrite a newer success", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:sync-race-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const wallet = enrollWallet("pol_ignored");
+      let callCount = 0;
+      let activeFetches = 0;
+      let maxActiveFetches = 0;
+      let markFirstStarted!: () => void;
+      let markSecondStarted!: () => void;
+      let rejectFirst!: (reason: Error) => void;
+      const firstStarted = new Promise<void>((resolve) => {
+        markFirstStarted = resolve;
+      });
+      const secondStarted = new Promise<void>((resolve) => {
+        markSecondStarted = resolve;
+      });
+      const fetchMock = vi.fn<PrivyFetch>(async (url) => {
+        if (!url.includes("/wallets?user_id="))
+          return mockResponse({ error: "not_found" }, 404);
+
+        callCount += 1;
+        activeFetches += 1;
+        maxActiveFetches = Math.max(maxActiveFetches, activeFetches);
+        if (callCount === 1) {
+          markFirstStarted();
+          try {
+            return await new Promise<ReturnType<typeof mockResponse>>(
+              (_resolve, reject) => {
+                rejectFirst = reject;
+              },
+            );
+          } finally {
+            activeFetches -= 1;
+          }
+        }
+
+        markSecondStarted();
+        activeFetches -= 1;
+        return mockResponse({ data: [wallet] });
+      });
+      const client = new PrivyServerClient({
+        appId: APP_ID,
+        appSecret: APP_SECRET,
+        baseUrl: BASE,
+        fetch: fetchMock,
+        requestTimeoutMs: 1_000,
+      });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+
+      const firstSync = service.syncWallet(userId);
+      const firstResult = expect(firstSync).rejects.toBeInstanceOf(
+        WalletUnavailableError,
+      );
+      await firstStarted;
+      const secondSync = service.syncWallet(userId);
+      const secondStartedBeforeRelease = await Promise.race([
+        secondStarted.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+      ]);
+
+      rejectFirst(new Error("older provider request failed"));
+      await firstResult;
+      await expect(secondSync).resolves.toMatchObject({
+        state: "ready",
+        address: wallet.address,
+      });
+      await expect(service.getCurrentWallet(userId)).resolves.toMatchObject({
+        state: "ready",
+        address: wallet.address,
+      });
+      expect(secondStartedBeforeRelease).toBe(false);
+      expect(maxActiveFetches).toBe(1);
+    });
+
+    it("atomically replaces a stale ready binding when Privy attributes a new wallet", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:replacement-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const firstWallet = enrollWallet(
+        "pol_ignored",
+        "owner-key-quorum",
+        `provider-wallet-${randomUUID()}`,
+      );
+      const secondWallet = {
+        ...enrollWallet(
+          "pol_ignored",
+          "owner-key-quorum",
+          `provider-wallet-${randomUUID()}`,
+        ),
+        address: "0x2222222222222222222222222222222222222222",
+      };
+      const { client } = mockServerClient({
+        lists: [[firstWallet], [secondWallet]],
+      });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+
+      await service.syncWallet(userId);
+      const replaced = await service.syncWallet(userId);
+      expect(replaced).toMatchObject({
+        state: "ready",
+        address: secondWallet.address,
+      });
+      const rows = await database.query<{
+        provider_wallet_id: string;
+        state: string;
+      }>(
+        "SELECT provider_wallet_id, state FROM user_wallets WHERE user_id = $1 ORDER BY provider_wallet_id",
+        [userId],
+      );
+      expect(rows.rows).toEqual(
+        expect.arrayContaining([
+          { provider_wallet_id: firstWallet.id, state: "unavailable" },
+          { provider_wallet_id: secondWallet.id, state: "ready" },
+        ]),
+      );
+    });
+
     it("sync marks multiple owned wallets as conflict", {
       timeout: 60_000,
     }, async () => {
@@ -217,14 +403,13 @@ suite(
       expect(result.state).toBe("conflict");
     });
 
-    it("prepare is idempotent (same policyId on retry) and returns quorumId + aggregationReady:false", {
+    it("prepare creates the per-transfer provider policy and a pending grant (user-authorized scope)", {
       timeout: 60_000,
     }, async () => {
       const did = `did:privy:prep-${randomUUID()}`;
       const userId = await provisionUser(database, did);
-      const { client } = mockServerClient({
-        policyId: "pol_enroll_1",
-        list: [enrollWallet("pol_enroll_1", did)],
+      const { client, fetchMock } = mockServerClient({
+        list: [enrollWallet("pol_enroll_1")],
       });
       const service = new EmbeddedWalletService(
         database,
@@ -233,30 +418,37 @@ suite(
         { keyQuorumId: "key-quorum-1" },
       );
       await service.syncWallet(userId);
-      const first = await service.preparePermission(userId, [
+
+      const prep = await service.preparePermission(userId, [
         "0x1111111111111111111111111111111111111111",
       ]);
-      expect(first.policyId).toBe("pol_enroll_1");
-      expect(first.quorumId).toBe("key-quorum-1");
-      expect(first.aggregationReady).toBe(false);
-      expect(first.aggregateBlockReason).toContain("group_by");
-      const second = await service.preparePermission(userId, [
-        "0x1111111111111111111111111111111111111111",
-      ]);
-      expect(second.policyId).toBe("pol_enroll_1");
+      // Per-transfer policy created server-side; the rolling-hour aggregate
+      // stays a pending feature (never enforced, never hidden).
+      expect(prep.policyId).toBe("pol_1");
+      expect(prep.aggregationReady).toBe(false);
+      expect(prep.aggregateBlockReason).toMatch(/group_by/u);
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith("/policies") && init.method === "POST",
+        ),
+      ).toBe(true);
+      const rows = await database.query<{ state: string }>(
+        "SELECT state FROM signer_grants WHERE user_id = $1 LIMIT 1",
+        [userId],
+      );
+      expect(rows.rows[0]?.state).toBe("pending");
     });
 
-    it("complete proves owner + policy via read-back and activates", {
+    it("does not activate when the attached signer policy differs from the stored grant", {
       timeout: 60_000,
     }, async () => {
       const did = `did:privy:complete-${randomUUID()}`;
       const userId = await provisionUser(database, did);
-      const wallet = enrollWallet("pol_enroll_1", did);
-      const { client } = mockServerClient({
-        policyId: "pol_enroll_1",
-        list: [wallet],
-        wallet,
-      });
+      // The provider wallet carries a signer with a DIFFERENT policy id:
+      // ownership proves, but the stored grant's policy is not attached.
+      const wallet = enrollWallet("pol_other");
+      const { client } = mockServerClient({ list: [wallet] });
       const service = new EmbeddedWalletService(
         database,
         createPrivyWalletApiClient(process.env, {}),
@@ -264,71 +456,104 @@ suite(
         { keyQuorumId: "key-quorum-1" },
       );
       await service.syncWallet(userId);
-      const prep = await service.preparePermission(userId, [
-        "0x1111111111111111111111111111111111111111",
-      ]);
-      const result = await service.completePermission(userId, prep.walletId);
-      expect(result.verified).toBe(true);
-      expect(result.state).toBe("active");
-      expect(result.permission?.state).toBe("active");
-      expect(result.permission?.recipients).toContain(
-        "0x1111111111111111111111111111111111111111",
+      const localWallet = await service.getCurrentWallet(userId);
+      await database.query(
+        `INSERT INTO signer_grants
+           (user_id, wallet_id, provider_policy_id, policy_hash, allowlisted_recipients,
+            per_transfer_atomic6, rolling_total_atomic6, rolling_window_seconds, gas_ceiling, state)
+           VALUES ($1, $2, 'pol_enroll_1', 'hash', '["0x1111111111111111111111111111111111111111"]'::jsonb,
+                   '10000000', '50000000', 3600, '0.01', 'pending')`,
+        [userId, localWallet.id],
       );
-      expect(result.permission?.aggregationReady).toBe(false);
-    });
 
-    it("forged owner read-back keeps the grant pending and never activates", {
-      timeout: 60_000,
-    }, async () => {
-      const userId = await provisionUser(
-        database,
-        `did:privy:forged-${randomUUID()}`,
-      );
-      const wallet = enrollWallet("pol_enroll_1", "did:privy:some-other-user");
-      const { client } = mockServerClient({
-        policyId: "pol_enroll_1",
-        list: [wallet],
-        // owner does NOT match the caller's privy_did → forged wallet
-        wallet,
-      });
-      const service = new EmbeddedWalletService(
-        database,
-        createPrivyWalletApiClient(process.env, {}),
-        client,
-        { keyQuorumId: "key-quorum-1" },
-      );
-      await service.syncWallet(userId);
-      const prep = await service.preparePermission(userId, [
-        "0x1111111111111111111111111111111111111111",
-      ]);
-      const result = await service.completePermission(userId, prep.walletId);
+      const result = await service.completePermission(userId, localWallet.id);
       expect(result.verified).toBe(false);
-      expect(result.state).toBe("pending");
-      expect(result.permission).toBeNull();
-      expect(result.observed.walletOwnerMatches).toBe(false);
+      expect(result.observed?.policyAttached).toBe(false);
       const rows = await database.query<{ state: string }>(
         "SELECT state FROM signer_grants WHERE wallet_id = $1",
-        [prep.walletId],
+        [localWallet.id],
       );
-      // The grant stays pending (never an optimistic client success flag).
       expect(rows.rows[0]?.state).toBe("pending");
     });
 
-    it("a client success flag alone can never activate (read-back lacks the policy)", {
+    it("never activates when the wallet disappears from the user's filtered list", {
       timeout: 60_000,
     }, async () => {
-      const did = `did:privy:csf-${randomUUID()}`;
+      const did = `did:privy:ownership-loss-${randomUUID()}`;
       const userId = await provisionUser(database, did);
-      const listWallet = enrollWallet("pol_enroll_1", did);
-      const readbackWallet: PrivyWalletRecord = {
-        ...listWallet,
-        signers: [{ signer_id: "other-signer", policy_ids: ["pol_different"] }],
-      };
+      const wallet = enrollWallet("pol_enroll_1");
+      const { client } = mockServerClient({ lists: [[wallet], []] });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+      await service.syncWallet(userId);
+      const localWallet = await service.getCurrentWallet(userId);
+      await database.query(
+        `INSERT INTO signer_grants
+         (user_id, wallet_id, provider_policy_id, policy_hash, allowlisted_recipients,
+          per_transfer_atomic6, rolling_total_atomic6, rolling_window_seconds, gas_ceiling, state)
+         VALUES ($1, $2, 'pol_enroll_1', 'hash', '["0x1111111111111111111111111111111111111111"]'::jsonb,
+                 '10000000', '50000000', 3600, '0.01', 'pending')`,
+        [userId, localWallet.id],
+      );
+
+      const result = await service.completePermission(userId, localWallet.id);
+      expect(result.verified).toBe(false);
+      const rows = await database.query<{ state: string }>(
+        "SELECT state FROM signer_grants WHERE wallet_id = $1",
+        [localWallet.id],
+      );
+      expect(rows.rows[0]?.state).toBe("pending");
+    });
+
+    it("never reports a real Privy grant revoked without provider removal and read-back", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:revoke-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const wallet = enrollWallet("pol_enroll_1");
+      const { client } = mockServerClient({ list: [wallet] });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+      await service.syncWallet(userId);
+      const localWallet = await service.getCurrentWallet(userId);
+      await database.query(
+        `INSERT INTO signer_grants
+         (user_id, wallet_id, provider_policy_id, provider_signer_id, policy_hash,
+          allowlisted_recipients, per_transfer_atomic6, rolling_total_atomic6,
+          rolling_window_seconds, gas_ceiling, state)
+         VALUES ($1, $2, 'pol_enroll_1', 'auth-signer-1', 'hash',
+                 '["0x1111111111111111111111111111111111111111"]'::jsonb,
+                 '10000000', '50000000', 3600, '0.01', 'active')`,
+        [userId, localWallet.id],
+      );
+
+      await expect(service.revokePermission(userId)).rejects.toBeInstanceOf(
+        WalletUnavailableError,
+      );
+      const rows = await database.query<{ state: string }>(
+        "SELECT state FROM signer_grants WHERE wallet_id = $1",
+        [localWallet.id],
+      );
+      expect(rows.rows[0]?.state).toBe("revoking");
+    });
+
+    it("maps a provider failure during complete to unavailable and keeps the grant pending", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:complete-unavailable-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const wallet = enrollWallet("pol_enroll_1");
       const { client } = mockServerClient({
-        policyId: "pol_enroll_1",
-        list: [listWallet],
-        // owner correct but NO signer carries the stored policy id
-        wallet: readbackWallet,
+        lists: [[wallet], [wallet]],
+        listStatuses: [200, 503],
       });
       const service = new EmbeddedWalletService(
         database,
@@ -337,16 +562,22 @@ suite(
         { keyQuorumId: "key-quorum-1" },
       );
       await service.syncWallet(userId);
-      const prep = await service.preparePermission(userId, [
-        "0x1111111111111111111111111111111111111111",
-      ]);
-      const result = await service.completePermission(userId, prep.walletId);
-      expect(result.verified).toBe(false);
-      expect(result.observed.policyAttached).toBe(false);
-      expect(result.observed.observedPolicyIds).toContain("pol_different");
+      const localWallet = await service.getCurrentWallet(userId);
+      await database.query(
+        `INSERT INTO signer_grants
+           (user_id, wallet_id, provider_policy_id, policy_hash, allowlisted_recipients,
+            per_transfer_atomic6, rolling_total_atomic6, rolling_window_seconds, gas_ceiling, state)
+           VALUES ($1, $2, 'pol_enroll_1', 'hash', '["0x1111111111111111111111111111111111111111"]'::jsonb,
+                   '10000000', '50000000', 3600, '0.01', 'pending')`,
+        [userId, localWallet.id],
+      );
+
+      await expect(
+        service.completePermission(userId, localWallet.id),
+      ).rejects.toBeInstanceOf(WalletUnavailableError);
       const rows = await database.query<{ state: string }>(
         "SELECT state FROM signer_grants WHERE wallet_id = $1",
-        [prep.walletId],
+        [localWallet.id],
       );
       expect(rows.rows[0]?.state).toBe("pending");
     });
@@ -376,15 +607,14 @@ suite(
       ).rejects.toBeInstanceOf(WalletUnavailableError);
     });
 
-    it("authenticated prepare + complete flow via the HTTP envelope (privy token)", {
+    it("authenticated prepare endpoint activates enrollment with the pending hourly limit surfaced", {
       timeout: 60_000,
     }, async () => {
       const did = `did:privy:route-${randomUUID()}`;
       const wallet = enrollWallet("pol_route", did);
       const { client } = mockServerClient({
-        policyId: "pol_route",
         list: [wallet],
-        wallet,
+        policyId: "pol_route_1",
       });
       // Build the app with the injected mock server client.
       const app = buildServer({ privyServer: client });
@@ -407,21 +637,107 @@ suite(
           },
         });
         expect(prepare.statusCode).toBe(200);
-        const prep = prepare.json().data;
-        expect(prep.policyId).toBe("pol_route");
-        expect(prep.quorumId).toBe("key-quorum-1");
-        expect(prep.aggregationReady).toBe(false);
-        expect(JSON.stringify(prep)).not.toContain(APP_SECRET);
+        expect(prepare.json().data.policyId).toBe("pol_route_1");
+        expect(prepare.json().data.aggregationReady).toBe(false);
+        expect(JSON.stringify(prepare.json())).not.toContain(APP_SECRET);
+      } finally {
+        await app.close();
+      }
+    });
 
-        const complete = await app.inject({
+    it("rejects the legacy activation endpoint for an authenticated Privy user", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:legacy-activate-${randomUUID()}`;
+      const { client } = mockServerClient({
+        list: [enrollWallet("pol_legacy")],
+      });
+      const app = buildServer({ privyServer: client });
+      try {
+        const authorization = `Bearer ${await signToken(did, verifyPrivateKey)}`;
+        const sync = await app.inject({
           method: "POST",
-          url: "/v1/wallets/current/permission/complete",
-          headers: { authorization: `Bearer ${token}` },
-          payload: { walletId: prep.walletId },
+          url: "/v1/wallets/sync",
+          headers: { authorization },
         });
-        expect(complete.statusCode).toBe(200);
-        expect(complete.json().data.verified).toBe(true);
-        expect(complete.json().data.state).toBe("active");
+        const userId = sync.json().data.userId as string;
+        const activation = await app.inject({
+          method: "POST",
+          url: "/v1/wallets/current/permission",
+          headers: { authorization },
+          payload: {
+            recipients: ["0x1111111111111111111111111111111111111111"],
+          },
+        });
+
+        expect(activation.statusCode).toBe(503);
+        expect(activation.json().error.code).toBe("WALLET_NO_DISPONIBLE");
+        const rows = await database.query<{ count: string }>(
+          "SELECT count(*)::text AS count FROM signer_grants WHERE user_id = $1",
+          [userId],
+        );
+        expect(rows.rows[0]?.count).toBe("0");
+      } finally {
+        await app.close();
+      }
+    });
+
+    it("reports a legacy active row honestly with the pending hourly limit", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:legacy-active-${randomUUID()}`;
+      const userId = await provisionUser(database, did);
+      const { client } = mockServerClient({
+        list: [enrollWallet("pol_legacy")],
+      });
+      const service = new EmbeddedWalletService(
+        database,
+        createPrivyWalletApiClient(process.env, {}),
+        client,
+        { keyQuorumId: "key-quorum-1" },
+      );
+      await service.syncWallet(userId);
+      const wallet = await service.getCurrentWallet(userId);
+      await database.query(
+        `INSERT INTO signer_grants
+           (user_id, wallet_id, provider_policy_id, provider_signer_id, policy_hash,
+            allowlisted_recipients, per_transfer_atomic6, rolling_total_atomic6,
+            rolling_window_seconds, gas_ceiling, state)
+           VALUES ($1, $2, 'pol_legacy', 'signer-legacy', 'legacy-hash',
+                   '["0x1111111111111111111111111111111111111111"]'::jsonb,
+                   '10000000', '50000000', 3600, '0.01', 'active')`,
+        [userId, wallet.id],
+      );
+
+      // USER DECISION (2026-09-09): the real state is reported honestly; the
+      // unenforced hourly limit stays visible, never 'unavailable'.
+      await expect(service.getPermission(userId)).resolves.toMatchObject({
+        state: "active",
+        grantId: expect.any(String),
+        aggregationReady: false,
+        aggregateOvershootCaveat: true,
+      });
+    });
+
+    it("authenticated sync maps Privy discovery failures to 503", {
+      timeout: 60_000,
+    }, async () => {
+      const did = `did:privy:sync-unavailable-${randomUUID()}`;
+      const { client } = mockServerClient({ listStatuses: [503] });
+      const app = buildServer({ privyServer: client });
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/v1/wallets/sync",
+          headers: {
+            authorization: `Bearer ${await signToken(did, verifyPrivateKey)}`,
+          },
+        });
+        expect(response.statusCode).toBe(503);
+        expect(response.json().error.code).toBe("WALLET_NO_DISPONIBLE");
+        expect(response.json().error.message).not.toContain(
+          "wallet_provider_unavailable",
+        );
       } finally {
         await app.close();
       }

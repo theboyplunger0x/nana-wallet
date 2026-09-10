@@ -32,6 +32,10 @@ import {
   type WalletProvider,
   type TransferRequest,
 } from "../wallet/provider.js";
+import {
+  bindWalletForUser,
+  type WalletForUser,
+} from "../wallet/privy-user-provider.js";
 import { validateWalletTransferPolicy } from "../wallet/agent-tools.js";
 import { isValidEvmAddress } from "../memory/address.js";
 import type { FinancialTaskRegistry } from "./financial-task-registry.js";
@@ -156,6 +160,7 @@ export interface WalletConversationService {
 export type WalletConversationDependencies = {
   conversations: ConversationRepository;
   wallet: WalletProvider;
+  walletForUser?: WalletForUser;
   memory?: RecipientMemoryRuntime;
   /**
    * PMU-014: per-request memory runtime for the RESOLVED user. Takes
@@ -179,6 +184,10 @@ export function createWalletConversationService(
 ): WalletConversationService {
   const clock = dependencies.clock ?? { now: () => Date.now() };
   const narration = dependencies.narration ?? createNarrationPolicy({ clock });
+  const walletForUser = (userId: string): WalletProvider =>
+    dependencies.walletForUser
+      ? bindWalletForUser(dependencies.walletForUser, userId)
+      : dependencies.wallet;
 
   async function* handleTurnStream(
     input: HandleTurnInput,
@@ -364,7 +373,7 @@ export function createWalletConversationService(
           : dependencies.memory
             ? { recipientMemory: dependencies.memory }
             : {}),
-        walletProvider: dependencies.wallet,
+        walletProvider: walletForUser(input.userId),
         ...(input.signal ? { abortSignal: input.signal } : {}),
         language: workingSnapshot.language,
       };
@@ -636,7 +645,9 @@ export function createWalletConversationService(
 
     let preview: TransferPreview;
     try {
-      preview = await dependencies.wallet.previewTransfer(transferRequest);
+      preview = await walletForUser(input.userId).previewTransfer(
+        transferRequest,
+      );
     } catch {
       return errorResult(errorFromCode("wallet_unavailable"));
     }
@@ -786,7 +797,7 @@ export function createWalletConversationService(
 
     let broadcast;
     try {
-      broadcast = await dependencies.wallet.broadcastTransfer(transfer);
+      broadcast = await walletForUser(userId).broadcastTransfer(transfer);
     } catch (error) {
       broadcast = {
         kind: "uncertain" as const,
@@ -871,7 +882,7 @@ export function createWalletConversationService(
 
     let finality;
     try {
-      finality = await dependencies.wallet.waitForFinality({ transaction });
+      finality = await walletForUser(userId).waitForFinality({ transaction });
     } catch (error) {
       finality = {
         status: "receipt_invalid" as const,

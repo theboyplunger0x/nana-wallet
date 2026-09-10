@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WalletProvider } from "../wallet/provider.js";
 import {
+  PRIVY_ARC_NETWORK,
+  PrivyWalletRuntimeError,
+  type WalletForUser,
+} from "../wallet/privy-user-provider.js";
+import {
   walletBalanceQuerySchema,
   walletBalanceResponseSchema,
   walletHistoryQuerySchema,
@@ -190,23 +195,39 @@ export async function registerWalletRoutes(
   app: FastifyInstance,
   dependencies: {
     wallet: WalletProvider;
+    walletForUser?: WalletForUser;
     resolveUserId?: (request: FastifyRequest) => Promise<string>;
   },
 ): Promise<void> {
-  // PMU-024: in privy mode wallet reads authenticate; demo stays compatible.
-  const requireAuth = dependencies.resolveUserId
-    ? async (request: FastifyRequest): Promise<void> => {
-        await dependencies.resolveUserId!(request);
-      }
-    : undefined;
+  const resolveWallet = async (
+    request: FastifyRequest,
+  ): Promise<{ provider: WalletProvider; wallet: string }> => {
+    if (!dependencies.resolveUserId) {
+      return { provider: dependencies.wallet, wallet: WALLET };
+    }
+    const userId = await dependencies.resolveUserId(request);
+    return {
+      provider: dependencies.walletForUser
+        ? await dependencies.walletForUser(userId)
+        : dependencies.wallet,
+      wallet: dependencies.walletForUser ? userId : WALLET,
+    };
+  };
+  const defaultNetwork = dependencies.walletForUser
+    ? PRIVY_ARC_NETWORK
+    : NETWORK;
   app.get(
     "/v1/wallet/address",
-    async (request): Promise<WalletAddressResponse> => {
-      if (requireAuth) await requireAuth(request);
-      return dependencies.wallet.getAddress({
-        network: NETWORK,
-        wallet: WALLET,
-      });
+    async (request, reply): Promise<WalletAddressResponse | void> => {
+      try {
+        const resolved = await resolveWallet(request);
+        return resolved.provider.getAddress({
+          network: defaultNetwork,
+          wallet: resolved.wallet,
+        });
+      } catch (error) {
+        return sendWalletRuntimeError(reply, error);
+      }
     },
   );
 
@@ -218,9 +239,8 @@ export async function registerWalletRoutes(
       }>,
       reply,
     ): Promise<WalletBalanceResponse | void> => {
-      if (requireAuth) await requireAuth(request);
       const parsed = walletBalanceQuerySchema.safeParse({
-        network: request.query.network ?? NETWORK,
+        network: request.query.network ?? defaultNetwork,
         token: request.query.token,
       });
       if (!parsed.success) {
@@ -231,16 +251,18 @@ export async function registerWalletRoutes(
           code: "invalid_query",
         });
       }
-      const toolInput = {
-        ...parsed.data,
-        wallet: WALLET,
-      };
-      const address = await dependencies.wallet.getAddress({
-        network: parsed.data.network,
-        wallet: WALLET,
-      });
-      const balance = await dependencies.wallet.getBalance(toolInput);
-      return normalizeWalletBalance(address, balance, parsed.data.token);
+      try {
+        const resolved = await resolveWallet(request);
+        const toolInput = { ...parsed.data, wallet: resolved.wallet };
+        const address = await resolved.provider.getAddress({
+          network: parsed.data.network,
+          wallet: resolved.wallet,
+        });
+        const balance = await resolved.provider.getBalance(toolInput);
+        return normalizeWalletBalance(address, balance, parsed.data.token);
+      } catch (error) {
+        return sendWalletRuntimeError(reply, error);
+      }
     },
   );
 
@@ -252,9 +274,8 @@ export async function registerWalletRoutes(
       }>,
       reply,
     ): Promise<WalletHistoryResponse | void> => {
-      if (requireAuth) await requireAuth(request);
       const parsed = walletHistoryQuerySchema.safeParse({
-        network: request.query.network ?? NETWORK,
+        network: request.query.network ?? defaultNetwork,
         token: request.query.token,
       });
       if (!parsed.success) {
@@ -265,11 +286,35 @@ export async function registerWalletRoutes(
           code: "invalid_query",
         });
       }
-      const history = await dependencies.wallet.getHistory({
-        ...parsed.data,
-        wallet: WALLET,
-      });
-      return normalizeWalletHistory(history, parsed.data.token);
+      try {
+        const resolved = await resolveWallet(request);
+        const history = await resolved.provider.getHistory({
+          ...parsed.data,
+          wallet: resolved.wallet,
+        });
+        return normalizeWalletHistory(history, parsed.data.token);
+      } catch (error) {
+        return sendWalletRuntimeError(reply, error);
+      }
     },
   );
+}
+
+function sendWalletRuntimeError(
+  reply: { code(statusCode: number): unknown; send(payload: unknown): unknown },
+  error: unknown,
+): void {
+  if (!(error instanceof PrivyWalletRuntimeError)) throw error;
+  const statusCode =
+    error.code === "wallet_not_ready"
+      ? 409
+      : error.code === "wallet_feature_unavailable"
+        ? 501
+        : 503;
+  reply.code(statusCode);
+  reply.send({
+    status: "error",
+    code: error.code,
+    message: error.message,
+  });
 }

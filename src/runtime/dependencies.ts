@@ -33,6 +33,14 @@ import {
   getConfiguredRecipientMemoryRuntime,
   getMemoryRuntimeForUser,
 } from "../memory/runtime.js";
+import { readIdentityProviderMode } from "../config/process.js";
+import { readPrivyServerConfig } from "../config/privy-server.js";
+import { PrivyServerClient } from "../wallet/privy-server-client.js";
+import {
+  createPrivyWalletForUserResolver,
+  createUnavailablePrivyWalletResolver,
+  type WalletForUser,
+} from "../wallet/privy-user-provider.js";
 
 export type CoreDependencies = {
   wallet: WalletProvider;
@@ -48,9 +56,34 @@ export type WorkerDependencies = CoreDependencies & {
   database: DatabaseClient;
   conversations: ConversationRepository;
   conversationService: WalletConversationService;
+  walletForUser?: WalletForUser;
   financialTasks: FinancialTaskRegistry;
   close(): Promise<void>;
 };
+
+export function createConfiguredWalletForUser(
+  database: DatabaseClient,
+  environment: NodeJS.ProcessEnv = process.env,
+  injectedPrivyServer?: PrivyServerClient,
+): WalletForUser | undefined {
+  if (readIdentityProviderMode(environment) !== "privy") return undefined;
+  const config = readPrivyServerConfig(environment);
+  const privyServer =
+    injectedPrivyServer ??
+    (config
+      ? new PrivyServerClient({
+          appId: config.appId,
+          appSecret: config.appSecret,
+          baseUrl: config.baseUrl,
+        })
+      : undefined);
+  if (!privyServer) return createUnavailablePrivyWalletResolver();
+  return createPrivyWalletForUserResolver({
+    database,
+    privy: privyServer,
+    rpcUrl: environment.ARC_TESTNET_RPC_URL?.trim() || undefined,
+  });
+}
 
 export function createWalletProvider(
   environment: NodeJS.ProcessEnv = process.env,
@@ -120,6 +153,7 @@ export function createWorkerDependencies(
   const database = createConfiguredDatabaseClient(environment);
   const conversations = new PostgresConversationRepository(database);
   const core = createCoreDependencies(environment);
+  const walletForUser = createConfiguredWalletForUser(database, environment);
   // REVIEW FIX V3: `isClaimedRecipientValid` needs a defined memory service to
   // revalidate versioned recipients; without it the check always returns false.
   // The service contract today scopes the TEXT path to the demo tenant
@@ -130,6 +164,7 @@ export function createWorkerDependencies(
   const conversationService = createWalletConversationService({
     conversations,
     wallet: core.wallet,
+    ...(walletForUser ? { walletForUser } : {}),
     memory,
     financialTasks,
     contextRenewal: core.contextRenewal,
@@ -143,6 +178,7 @@ export function createWorkerDependencies(
     database,
     conversations,
     conversationService,
+    ...(walletForUser ? { walletForUser } : {}),
     financialTasks,
     async close() {
       if (core.walletReads !== core.wallet) await core.walletReads.close();

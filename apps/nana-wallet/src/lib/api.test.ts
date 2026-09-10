@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   createConversationTurnSender,
+  getErrorMessage,
   queryKeys,
   setApiToken,
   setApiTokenSource,
@@ -106,6 +107,58 @@ describe("conversation API", () => {
         "response",
       ),
     ).toBe(true);
+  });
+});
+
+describe("Privy wallet data", () => {
+  it("derives the visible summary from the authenticated Arc USDC balance", async () => {
+    vi.stubEnv("VITE_IDENTITY_PROVIDER", "privy");
+    setApiTokenSource({ getToken: async () => "privy-token" });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        network: "arc-testnet",
+        token: "USDC",
+        address: "0x1111111111111111111111111111111111111111",
+        balance: "7.25",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getWalletSummary()).resolves.toMatchObject({
+      total: { amount: "7.25", currency: "USDC", display: "7.25 USDC" },
+      accounts: [
+        {
+          id: "0x1111111111111111111111111111111111111111",
+          kind: "usdc",
+          balance: { amount: "7.25", currency: "USDC" },
+        },
+      ],
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/v1/wallet/balance?network=arc-testnet&token=USDC",
+    );
+  });
+
+  it("surfaces wallet-not-ready without inventing a zero balance", async () => {
+    vi.stubEnv("VITE_IDENTITY_PROVIDER", "privy");
+    setApiTokenSource({ getToken: async () => "privy-token" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse(
+          {
+            status: "error",
+            code: "wallet_not_ready",
+            message: "No eligible wallet.",
+          },
+          409,
+        ),
+      ),
+    );
+
+    const error = await api.getWalletSummary().catch((caught: unknown) => caught);
+    expect(getErrorMessage(error)).toContain("todavía se está preparando");
+    expect(JSON.stringify(error)).not.toContain('"balance":"0"');
   });
 });
 

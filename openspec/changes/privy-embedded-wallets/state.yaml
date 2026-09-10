@@ -1,7 +1,7 @@
 schema: sdd-state/v1
 change: privy-embedded-wallets
 artifact_store: openspec
-updated_at: 2026-09-08
+updated_at: 2026-09-09
 revision: 2026-09-08-r3
 depends_on:
   - privy-multi-user-foundation
@@ -12,7 +12,7 @@ phases:
   spec: completed
   design: completed
   tasks: completed
-  apply: completed
+  apply: in_progress
   verify: in_progress
   archive: not_started
 product_decisions: approved
@@ -22,12 +22,14 @@ authorization_note: >-
   user explicitly authorized implementation on 2026-09-08
   ("begin development"); supersedes the earlier
   implementation_authorized false gate
-next_recommended: verify_live_enrollment
+next_recommended: complete_per_user_runtime_and_verify_provider_controls
 open_decisions:
   - Q2_fee_accounting
 verification_gaps:
-  - privy_credentials_and_existing_phone_channel
-  - sdk_policy_arc_live_capabilities
+  - existing_phone_channel_and_authenticated_wallet_creation
+  - provider_rolling_scope_and_fee_policy_proof
+  - durable_real_transaction_transport_integration
+  - user_authenticated_live_wallet_end_to_end
 independent_review: historical_r2_only_never_invent_evidence
 spec_review: resolved_by_r3_consolidation
 question_inventory: >-
@@ -57,24 +59,32 @@ provider_constraints:
   aggregate_updates_are_not_atomic_with_concurrent_signing: true
 enrollment_slice:
   date: 2026-09-09
-  scope: >-
-    real owner-verified sync + user-authenticated
-    addSigners enrollment with policy readback
-    real owner-verified sync + user-authenticated
-    addSigners enrollment with policy readback
+  scope: trusted_user_filtered_wallet_sync_and_explicit_signer_readiness
   live_read_only_smoke: >-
-    GET /v1/wallets 200 with 0 wallets (PASS);
-    ?limit= 500 response recorded
-    GET /v1/wallets 200 with 0 wallets (PASS);
-    ?limit= 500 response recorded
-  rolling_window_enforcement: BLOCKED_pending_wallet_identity_group_by_proof
-  external_config_request: >-
-    parent to confirm wallet-identity group_by scope
-    or per-wallet aggregation quota with Privy
-    parent to confirm wallet-identity group_by scope
-    or per-wallet aggregation quota with Privy
+    wallets_http_200_zero_wallets_one_user_zero_embedded_accounts
+  rolling_window_enforcement: blocked_pending_provider_scope_proof
+  fee_policy_enforcement: blocked_pending_supported_provider_condition
   prior_completion_correction: >-
-    earlier verify-completed claim was fixture-only;
-    live verification remains open
-    earlier verify-completed claim was fixture-only;
-    live verification remains open
+    prior completion reports relied on fixture clients and fabricated
+    broadcast receipts; real per-user runtime is being implemented and
+    live transfer acceptance remains open
+runtime_slice:
+  state: in_progress
+  legacy_providers: WDK_and_Circle_preserved_for_demo
+  privy_reads: real_owned_Arc_RPC_reads_under_implementation
+  live_transfers_enabled: false
+  evidence: >-
+    .agent-workflow/tasks/privy-embedded-wallets/runtime-provider-evidence.md
+signing_scope_decision:
+  date: 2026-09-09
+  decision: >-
+    user explicitly authorized enabling signer enrollment/payments with the
+    provable per-transfer policy only; the rolling 50 USDC/3600s aggregate is
+    a pending feature, surfaced honestly (aggregationReady:false + caveat),
+    never hidden and never claimed enforced
+  still_enforced: >-
+    per-transfer cap 10 USDC, recipient allowlist, chain 5042002,
+    gas ceiling, ownership readback, preview/confirm, revoke
+  enforcement_gap: >-
+    rolling hourly aggregate NOT enforced until parent proves
+    wallet-identity grouping

@@ -14,7 +14,10 @@ import { readRecipientMemoryConfig } from "./config/env.js";
 import { registerVoiceRoutes, type VoiceRoutesOptions } from "./api/voice.js";
 import { readLiveKitTokenIssuerConfig } from "./config/livekit.js";
 import { issueRoomToken, type RoomTokenInput } from "./livekit/token-issuer.js";
-import { createCoreDependencies } from "./runtime/dependencies.js";
+import {
+  createConfiguredWalletForUser,
+  createCoreDependencies,
+} from "./runtime/dependencies.js";
 import {
   DemoIdentityProvider,
   type RequestIdentityProvider,
@@ -40,16 +43,20 @@ import {
   getConfiguredRecipientMemoryRuntime,
   getMemoryRuntimeForUser,
 } from "./memory/runtime.js";
-import { EmbeddedWalletService } from "./wallet/embedded.js";
+import { EmbeddedWalletService, WalletUnavailableError } from "./wallet/embedded.js";
 import {
   WalletBalancesService,
   createBalanceReader,
   readBalanceReadConfig,
 } from "./wallet/balances.js";
-import { createPrivyWalletApiClient } from "./wallet/privy-client.js";
+import {
+  createPrivyWalletApiClient,
+  type PrivyWalletApiClient,
+} from "./wallet/privy-client.js";
 import { registerWalletsRoutes } from "./api/wallets.js";
 import { readPrivyServerConfig } from "./config/privy-server.js";
 import { PrivyServerClient } from "./wallet/privy-server-client.js";
+import { createPrivyWalletHealthProvider } from "./wallet/privy-user-provider.js";
 import type { FastifyRequest } from "fastify";
 
 export const DEFAULT_CORS_ORIGINS = [
@@ -139,11 +146,32 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
   const resolveUserId = async (request: FastifyRequest): Promise<string> =>
     (await identity.resolve(request)).userId;
 
-  app.register(registerHealthRoutes, { wallet: core.walletReads });
+  const privyServerConfig = database
+    ? readPrivyServerConfig(process.env)
+    : undefined;
+  const privyServer =
+    options.privyServer ??
+    (privyServerConfig
+      ? new PrivyServerClient({
+          appId: privyServerConfig.appId,
+          appSecret: privyServerConfig.appSecret,
+          baseUrl: privyServerConfig.baseUrl,
+        })
+      : undefined);
+  const walletForUser = database
+    ? createConfiguredWalletForUser(database, process.env, privyServer)
+    : undefined;
+
+  const healthWallet =
+    identityProviderMode === "privy"
+      ? createPrivyWalletHealthProvider(Boolean(privyServer))
+      : core.walletReads;
+  app.register(registerHealthRoutes, { wallet: healthWallet });
   // PMU-024: wallet reads authenticate in privy mode (public in demo for compatibility).
   app.register(registerWalletRoutes, {
     wallet: core.walletReads,
     ...(identityProviderMode === "privy" ? { resolveUserId } : {}),
+    ...(walletForUser ? { walletForUser } : {}),
   });
 
   if (database) {
@@ -156,6 +184,7 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
     const service = createWalletConversationService({
       conversations,
       wallet: core.wallet,
+      ...(walletForUser ? { walletForUser } : {}),
       financialTasks,
       contextRenewal: core.contextRenewal,
       // PMU-014: memory scoped to the RESOLVED per-request user in every mode;
@@ -204,17 +233,10 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
     // mode); the live wallet client fails closed without PRIVY_* credentials.
     // The server client is constructed ONLY when the server config is present
     // (app id + secret); otherwise sync/enrollment stay fixture-backed.
-    const privyClient = createPrivyWalletApiClient(process.env, {});
-    const privyServerConfig = readPrivyServerConfig(process.env);
-    const privyServer =
-      options.privyServer ??
-      (privyServerConfig
-        ? new PrivyServerClient({
-            appId: privyServerConfig.appId,
-            appSecret: privyServerConfig.appSecret,
-            baseUrl: privyServerConfig.baseUrl,
-          })
-        : undefined);
+    const privyClient =
+      identityProviderMode === "privy" && !privyServer
+        ? unavailablePrivyWalletClient()
+        : createPrivyWalletApiClient(process.env, {});
     const enrollment = privyServerConfig?.keyQuorumId
       ? { keyQuorumId: privyServerConfig.keyQuorumId }
       : undefined;
@@ -275,6 +297,41 @@ export function buildServer(options: { privyServer?: PrivyServerClient } = {}) {
   app.register(registerVoiceRoutes, voiceOptions);
 
   return app;
+}
+
+function unavailablePrivyWalletClient(): PrivyWalletApiClient {
+  const unavailable = (): never => {
+    throw new WalletUnavailableError(
+      "Privy wallet operations require a configured server client.",
+    );
+  };
+  return {
+    mode: "live",
+    async listWallets() {
+      return unavailable();
+    },
+    async getWallet() {
+      return unavailable();
+    },
+    async verifyOwnership() {
+      return unavailable();
+    },
+    async createWallet() {
+      return unavailable();
+    },
+    async readEffectivePolicy() {
+      return unavailable();
+    },
+    async createGrantPolicy() {
+      return unavailable();
+    },
+    async revokeGrantPolicy() {
+      return unavailable();
+    },
+    async signTransaction() {
+      return unavailable();
+    },
+  };
 }
 
 export function serverHost(
