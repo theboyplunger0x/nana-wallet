@@ -1,5 +1,10 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { WalletProvider } from '../wallet/provider.js';
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { WalletProvider } from "../wallet/provider.js";
+import {
+  PRIVY_ARC_NETWORK,
+  PrivyWalletRuntimeError,
+  type WalletForUser,
+} from "../wallet/privy-user-provider.js";
 import {
   walletBalanceQuerySchema,
   walletBalanceResponseSchema,
@@ -9,42 +14,42 @@ import {
   type WalletBalanceResponse,
   type WalletHistoryResponse,
   type WalletTransaction,
-} from '../contracts/http.js';
+} from "../contracts/http.js";
 
-const NETWORK = process.env.WDK_NETWORK ?? 'sepolia';
-const WALLET = process.env.WDK_WALLET_NAME ?? 'agent-demo';
+const NETWORK = process.env.WDK_NETWORK ?? "sepolia";
+const WALLET = process.env.WDK_WALLET_NAME ?? "agent-demo";
 
 export function normalizeWalletBalance(
   rawAddress: unknown,
   rawBalance: unknown,
   requestedToken?: string,
 ): WalletBalanceResponse {
-  const address = asRecord(rawAddress, 'WDK address');
-  const balance = asRecord(rawBalance, 'WDK balance');
+  const address = asRecord(rawAddress, "WDK address");
+  const balance = asRecord(rawBalance, "WDK balance");
   const currentBalance = walletBalanceResponseSchema.safeParse(rawBalance);
-  const network = requiredString(balance.network ?? address.network, 'WDK balance network');
+  const network = requiredString(
+    balance.network ?? address.network,
+    "WDK balance network",
+  );
 
-  if (
-    typeof address.network === 'string' &&
-    address.network !== network
-  ) {
-    throw new Error('WDK address and balance networks do not match.');
+  if (typeof address.network === "string" && address.network !== network) {
+    throw new Error("WDK address and balance networks do not match.");
   }
 
   return walletBalanceResponseSchema.parse({
     network,
     ...(requestedToken
       ? { token: requestedToken }
-      : typeof balance.token === 'string'
+      : typeof balance.token === "string"
         ? { token: balance.token }
         : {}),
-    address: requiredString(address.address, 'WDK wallet address'),
+    address: requiredString(address.address, "WDK wallet address"),
     balance: currentBalance.success
       ? currentBalance.data.balance
       : normalizeBaseUnits(
-          requiredString(balance.balance, 'WDK wallet balance'),
+          requiredString(balance.balance, "WDK wallet balance"),
           balance.decimals,
-          'WDK wallet balance',
+          "WDK wallet balance",
         ),
   });
 }
@@ -56,15 +61,15 @@ export function normalizeWalletHistory(
   const current = walletHistoryResponseSchema.safeParse(rawHistory);
   if (current.success) return current.data;
 
-  const history = asRecord(rawHistory, 'WDK history');
-  const network = requiredString(history.network, 'WDK history network');
-  const address = requiredString(history.address, 'WDK history address');
+  const history = asRecord(rawHistory, "WDK history");
+  const network = requiredString(history.network, "WDK history network");
+  const address = requiredString(history.address, "WDK history address");
   if (!Array.isArray(history.transfers)) {
-    throw new Error('WDK history transfers are missing.');
+    throw new Error("WDK history transfers are missing.");
   }
 
   const transactions = history.transfers.map((rawTransfer, index) =>
-    normalizeHistoryTransfer(rawTransfer, address, index, requestedToken)
+    normalizeHistoryTransfer(rawTransfer, address, index, requestedToken),
   );
 
   return walletHistoryResponseSchema.parse({ network, transactions });
@@ -77,55 +82,80 @@ function normalizeHistoryTransfer(
   requestedToken?: string,
 ): WalletTransaction {
   const transfer = asRecord(rawTransfer, `WDK history transfer ${index}`);
-  const from = stringField(transfer.from, `WDK history transfer ${index} sender`);
-  const to = stringField(transfer.to, `WDK history transfer ${index} recipient`);
-  const wallet = walletAddress.toLocaleLowerCase('en-US');
-  const sent = from.toLocaleLowerCase('en-US') === wallet;
-  const received = to.toLocaleLowerCase('en-US') === wallet;
+  const from = stringField(
+    transfer.from,
+    `WDK history transfer ${index} sender`,
+  );
+  const to = stringField(
+    transfer.to,
+    `WDK history transfer ${index} recipient`,
+  );
+  const wallet = walletAddress.toLocaleLowerCase("en-US");
+  const sent = from.toLocaleLowerCase("en-US") === wallet;
+  const received = to.toLocaleLowerCase("en-US") === wallet;
   if (!sent && !received) {
-    throw new Error(`WDK history transfer ${index} does not involve the queried wallet.`);
+    throw new Error(
+      `WDK history transfer ${index} does not involve the queried wallet.`,
+    );
   }
 
   return {
-    hash: requiredString(transfer.transactionHash, `WDK history transfer ${index} hash`),
-    direction: sent ? 'out' : 'in',
+    hash: requiredString(
+      transfer.transactionHash,
+      `WDK history transfer ${index} hash`,
+    ),
+    direction: sent ? "out" : "in",
     counterparty: sent ? to : from,
     amount: normalizeBaseUnits(
       requiredString(transfer.amount, `WDK history transfer ${index} amount`),
       transfer.decimals,
       `WDK history transfer ${index} amount`,
     ),
-    token: requestedToken ?? requiredString(transfer.token, `WDK history transfer ${index} token`),
+    token:
+      requestedToken ??
+      requiredString(transfer.token, `WDK history transfer ${index} token`),
     timestamp: normalizeTimestamp(transfer.timestamp, index),
   };
 }
 
-function normalizeBaseUnits(amount: string, decimals: unknown, label: string): string {
-  if (!Number.isInteger(decimals) || (decimals as number) < 0 || (decimals as number) > 255) {
-    throw new Error(`${label} decimals are missing or invalid; base units cannot be normalized.`);
+function normalizeBaseUnits(
+  amount: string,
+  decimals: unknown,
+  label: string,
+): string {
+  if (
+    !Number.isInteger(decimals) ||
+    (decimals as number) < 0 ||
+    (decimals as number) > 255
+  ) {
+    throw new Error(
+      `${label} decimals are missing or invalid; base units cannot be normalized.`,
+    );
   }
   if (!/^\d+$/.test(amount)) {
     throw new Error(`${label} is not an unsigned base-unit integer.`);
   }
 
   const decimalPlaces = decimals as number;
-  const digits = amount.replace(/^0+(?=\d)/, '');
+  const digits = amount.replace(/^0+(?=\d)/, "");
   if (decimalPlaces === 0) return digits;
 
-  const padded = digits.padStart(decimalPlaces + 1, '0');
+  const padded = digits.padStart(decimalPlaces + 1, "0");
   const whole = padded.slice(0, -decimalPlaces);
-  const fraction = padded.slice(-decimalPlaces).replace(/0+$/, '');
+  const fraction = padded.slice(-decimalPlaces).replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
 function normalizeTimestamp(value: unknown, index: number): string {
   let milliseconds: number;
-  if (typeof value === 'number' && Number.isFinite(value)) {
+  if (typeof value === "number" && Number.isFinite(value)) {
     milliseconds = Math.abs(value) < 1_000_000_000_000 ? value * 1_000 : value;
-  } else if (typeof value === 'string' && value.trim().length > 0) {
+  } else if (typeof value === "string" && value.trim().length > 0) {
     const numeric = Number(value);
     milliseconds = Number.isFinite(numeric)
-      ? (Math.abs(numeric) < 1_000_000_000_000 ? numeric * 1_000 : numeric)
+      ? Math.abs(numeric) < 1_000_000_000_000
+        ? numeric * 1_000
+        : numeric
       : Date.parse(value);
   } else {
     milliseconds = Number.NaN;
@@ -141,80 +171,150 @@ function normalizeTimestamp(value: unknown, index: number): string {
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} response is invalid.`);
   }
   return value as Record<string, unknown>;
 }
 
 function requiredString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
+  if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${label} is missing.`);
   }
   return value;
 }
 
 function stringField(value: unknown, label: string): string {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     throw new Error(`${label} is missing.`);
   }
   return value;
 }
 
-export async function registerWalletRoutes(app: FastifyInstance, dependencies: { wallet: WalletProvider }): Promise<void> {
-  app.get('/v1/wallet/address', async (): Promise<WalletAddressResponse> => {
-    return dependencies.wallet.getAddress({
-      network: NETWORK,
-      wallet: WALLET,
-    });
-  });
+export async function registerWalletRoutes(
+  app: FastifyInstance,
+  dependencies: {
+    wallet: WalletProvider;
+    walletForUser?: WalletForUser;
+    resolveUserId?: (request: FastifyRequest) => Promise<string>;
+  },
+): Promise<void> {
+  const resolveWallet = async (
+    request: FastifyRequest,
+  ): Promise<{ provider: WalletProvider; wallet: string }> => {
+    if (!dependencies.resolveUserId) {
+      return { provider: dependencies.wallet, wallet: WALLET };
+    }
+    const userId = await dependencies.resolveUserId(request);
+    return {
+      provider: dependencies.walletForUser
+        ? await dependencies.walletForUser(userId)
+        : dependencies.wallet,
+      wallet: dependencies.walletForUser ? userId : WALLET,
+    };
+  };
+  const defaultNetwork = dependencies.walletForUser
+    ? PRIVY_ARC_NETWORK
+    : NETWORK;
+  app.get(
+    "/v1/wallet/address",
+    async (request, reply): Promise<WalletAddressResponse | void> => {
+      try {
+        const resolved = await resolveWallet(request);
+        return resolved.provider.getAddress({
+          network: defaultNetwork,
+          wallet: resolved.wallet,
+        });
+      } catch (error) {
+        return sendWalletRuntimeError(reply, error);
+      }
+    },
+  );
 
   app.get(
-    '/v1/wallet/balance',
+    "/v1/wallet/balance",
     async (
-      request: FastifyRequest<{ Querystring: { network?: string; token?: string } }>,
+      request: FastifyRequest<{
+        Querystring: { network?: string; token?: string };
+      }>,
       reply,
     ): Promise<WalletBalanceResponse | void> => {
       const parsed = walletBalanceQuerySchema.safeParse({
-        network: request.query.network ?? NETWORK,
+        network: request.query.network ?? defaultNetwork,
         token: request.query.token,
       });
       if (!parsed.success) {
         reply.code(400);
-        return reply.send({ status: 'error', message: parsed.error.message, code: 'invalid_query' });
+        return reply.send({
+          status: "error",
+          message: parsed.error.message,
+          code: "invalid_query",
+        });
       }
-      const toolInput = {
-        ...parsed.data,
-        wallet: WALLET,
-      };
-      const address = await dependencies.wallet.getAddress({
-        network: parsed.data.network,
-        wallet: WALLET,
-      });
-      const balance = await dependencies.wallet.getBalance(toolInput);
-      return normalizeWalletBalance(address, balance, parsed.data.token);
+      try {
+        const resolved = await resolveWallet(request);
+        const toolInput = { ...parsed.data, wallet: resolved.wallet };
+        const address = await resolved.provider.getAddress({
+          network: parsed.data.network,
+          wallet: resolved.wallet,
+        });
+        const balance = await resolved.provider.getBalance(toolInput);
+        return normalizeWalletBalance(address, balance, parsed.data.token);
+      } catch (error) {
+        return sendWalletRuntimeError(reply, error);
+      }
     },
   );
 
   app.get(
-    '/v1/wallet/history',
+    "/v1/wallet/history",
     async (
-      request: FastifyRequest<{ Querystring: { network?: string; token?: string } }>,
+      request: FastifyRequest<{
+        Querystring: { network?: string; token?: string };
+      }>,
       reply,
     ): Promise<WalletHistoryResponse | void> => {
       const parsed = walletHistoryQuerySchema.safeParse({
-        network: request.query.network ?? NETWORK,
+        network: request.query.network ?? defaultNetwork,
         token: request.query.token,
       });
       if (!parsed.success) {
         reply.code(400);
-        return reply.send({ status: 'error', message: parsed.error.message, code: 'invalid_query' });
+        return reply.send({
+          status: "error",
+          message: parsed.error.message,
+          code: "invalid_query",
+        });
       }
-      const history = await dependencies.wallet.getHistory({
-        ...parsed.data,
-        wallet: WALLET,
-      });
-      return normalizeWalletHistory(history, parsed.data.token);
+      try {
+        const resolved = await resolveWallet(request);
+        const history = await resolved.provider.getHistory({
+          ...parsed.data,
+          wallet: resolved.wallet,
+        });
+        return normalizeWalletHistory(history, parsed.data.token);
+      } catch (error) {
+        return sendWalletRuntimeError(reply, error);
+      }
     },
   );
+}
+
+function sendWalletRuntimeError(
+  reply: { code(statusCode: number): unknown; send(payload: unknown): unknown },
+  error: unknown,
+): void {
+  if (!(error instanceof PrivyWalletRuntimeError)) throw error;
+  const statusCode =
+    error.code === "wallet_not_ready"
+      ? 409
+      : error.code === "wallet_feature_unavailable"
+        ? 501
+        : 503;
+  reply.code(statusCode);
+  reply.send({
+    status: "error",
+    code: error.code,
+    message: error.message,
+  });
 }

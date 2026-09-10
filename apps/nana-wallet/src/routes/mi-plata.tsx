@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowDownLeft, ArrowUpRight, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowDownLeft, ArrowUpRight, Sparkles } from "lucide-react";
 
 import { EmptyState, RouteError, RoutePending } from "@/components/RouteStates";
-import { api, queryKeys } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { api, getErrorMessage, queryKeys } from "@/lib/api";
 
 export const Route = createFileRoute("/mi-plata")({
   head: () => ({
@@ -33,33 +34,39 @@ function compactMoney(display: string) {
 }
 
 function MiPlataPage() {
-  const summaryQuery = useQuery({ queryKey: queryKeys.wallet, queryFn: api.getWalletSummary });
+  const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: api.getMe });
+  const userId = meQuery.data?.userId;
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.wallet(userId),
+    queryFn: api.getWalletSummary,
+    enabled: Boolean(userId),
+  });
   const movementsQuery = useQuery({
-    queryKey: queryKeys.movements,
+    queryKey: queryKeys.movements(userId),
     queryFn: () => api.getMovements({ limit: 20 }),
+    enabled: Boolean(userId),
   });
 
-  if (summaryQuery.isPending || movementsQuery.isPending) {
+  if (meQuery.isPending || summaryQuery.isPending) {
     return <RoutePending label="Estamos buscando tu plata" />;
   }
-  const error = summaryQuery.error ?? movementsQuery.error;
+  const error = meQuery.error ?? summaryQuery.error;
   if (error) {
     return (
       <RouteError
         error={error}
         onRetry={() => {
           void summaryQuery.refetch();
-          void movementsQuery.refetch();
         }}
       />
     );
   }
-  if (!summaryQuery.data || !movementsQuery.data) {
+  if (!summaryQuery.data) {
     return <RoutePending label="Estamos buscando tu plata" />;
   }
 
   const summary = summaryQuery.data;
-  const movements = movementsQuery.data.items;
+  const movements = movementsQuery.data?.items ?? [];
 
   return (
     <main className="mx-auto max-w-md px-6 pt-12 pb-40">
@@ -76,7 +83,7 @@ function MiPlataPage() {
           aria-hidden="true"
         />
         <div className="relative">
-          <p className="text-base font-bold text-background/70">Total en pesos</p>
+          <p className="text-base font-bold text-background/70">Saldo disponible</p>
           <p className="mt-1 text-4xl font-extrabold tracking-tight">{summary.total.display}</p>
         </div>
       </section>
@@ -102,7 +109,26 @@ function MiPlataPage() {
       )}
 
       <h2 className="mt-10 text-xl font-extrabold">Últimos movimientos</h2>
-      {movements.length === 0 ? (
+      {movementsQuery.isPending ? (
+        <EmptyState>Estamos buscando tus movimientos…</EmptyState>
+      ) : movementsQuery.error ? (
+        <section className="surface-card mt-4 p-5" role="alert">
+          <AlertCircle className="size-7 text-destructive" aria-hidden="true" />
+          <p className="mt-2 text-lg font-bold">No pudimos cargar tus movimientos.</p>
+          <p className="mt-1 text-base text-muted-foreground">
+            {getErrorMessage(movementsQuery.error)} El saldo de arriba sí corresponde a tu
+            billetera.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="press mt-4 min-h-12 w-full text-base font-extrabold"
+            onClick={() => void movementsQuery.refetch()}
+          >
+            Probar de nuevo
+          </Button>
+        </section>
+      ) : movements.length === 0 ? (
         <EmptyState>
           Todavía no tenés movimientos para mostrar. Cuando entre o salga plata, va a aparecer acá.
         </EmptyState>

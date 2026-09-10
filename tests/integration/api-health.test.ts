@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 // assert the fixture-mode health contract. The pins run before the server
 // import because dotenv evaluates the ambient .env during that import chain.
 vi.hoisted(() => {
+  process.env.IDENTITY_PROVIDER = 'demo';
   process.env.WDK_TOOLS_SOURCE = 'fixture';
   process.env.WDK_NETWORK = 'sepolia';
   process.env.WDK_TOKEN = 'USDT';

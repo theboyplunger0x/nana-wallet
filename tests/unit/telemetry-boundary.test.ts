@@ -24,30 +24,45 @@ function traceConfig(enabled: boolean) {
 
 describe("telemetry data boundary", () => {
   it("scrubs every occurrence and the complete PEM body", () => {
-    const body = 'Bearer firstsecret123 Bearer secondsecret456\n-----BEGIN PRIVATE KEY-----\nSYNTHETIC_PEM_PAYLOAD\n-----END PRIVATE KEY-----';
+    const body =
+      "Bearer firstsecret123 Bearer secondsecret456\n-----BEGIN PRIVATE KEY-----\nSYNTHETIC_PEM_PAYLOAD\n-----END PRIVATE KEY-----";
     const scrubbed = scrubProviderErrorBody(body);
-    expect(scrubbed).not.toContain('firstsecret123');
-    expect(scrubbed).not.toContain('secondsecret456');
-    expect(scrubbed).not.toContain('SYNTHETIC_PEM_PAYLOAD');
+    expect(scrubbed).not.toContain("firstsecret123");
+    expect(scrubbed).not.toContain("secondsecret456");
+    expect(scrubbed).not.toContain("SYNTHETIC_PEM_PAYLOAD");
   });
 
   it("blocks secrets stored as structured values or object keys without echoing them", () => {
     for (const arguments_ of [
-      { apiKey: 'opaque-secret-value' },
-      { authorization: 'Basic opaque-secret-value' },
-      { cookie: 'session=opaque-secret-value' },
-      { 'Bearer opaque-secret-value': 'ordinary' },
+      { apiKey: "opaque-secret-value" },
+      { authorization: "Basic opaque-secret-value" },
+      { cookie: "session=opaque-secret-value" },
+      { "Bearer opaque-secret-value": "ordinary" },
     ]) {
-      const decision = admitTelemetryEvent({ kind: 'tool_call', conversationIdHash: 'c', turnId: 't', name: 'read', arguments: arguments_ });
-      expect(decision).toMatchObject({ ok: false, reason: 'forbidden_content' });
-      expect(JSON.stringify(decision)).not.toContain('opaque-secret-value');
+      const decision = admitTelemetryEvent({
+        kind: "tool_call",
+        conversationIdHash: "c",
+        turnId: "t",
+        name: "read",
+        arguments: arguments_,
+      });
+      expect(decision).toMatchObject({
+        ok: false,
+        reason: "forbidden_content",
+      });
+      expect(JSON.stringify(decision)).not.toContain("opaque-secret-value");
     }
   });
 
   it("does not echo unexpected field names in schema errors", () => {
-    const decision = admitTelemetryEvent({ kind: 'error', code: 'test', message: 'safe', 'Bearer opaque-secret-value': 'x' });
+    const decision = admitTelemetryEvent({
+      kind: "error",
+      code: "test",
+      message: "safe",
+      "Bearer opaque-secret-value": "x",
+    });
     expect(decision.ok).toBe(false);
-    expect(JSON.stringify(decision)).not.toContain('opaque-secret-value');
+    expect(JSON.stringify(decision)).not.toContain("opaque-secret-value");
   });
 
   it("admits allowlisted conversation, tool call, error, and latency payloads", () => {
@@ -135,7 +150,7 @@ describe("telemetry data boundary", () => {
       { authorization: "Authorization: Bearer abcdef123456" },
     ],
     ["cookie header", { cookie: "Cookie: session=abcdef123456" }],
-    ["api key assignment", { config: "api_key = sk-liveabcdef123456" }],
+    ["api key assignment", { config: "api_key = sk-liveabcdef123456" }], // gitleaks:allow (redaction test fixture)
     ["bearer token", { header: "bearer abcdefgh1234" }],
     [
       "private key",

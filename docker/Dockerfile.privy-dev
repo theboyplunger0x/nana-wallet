@@ -1,0 +1,6 @@
+# Development dependency image. Application source is mounted read-only by
+# compose.privy-local.yaml and compiled inside each application container.
+FROM node:22.18-bookworm AS dependencies
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci

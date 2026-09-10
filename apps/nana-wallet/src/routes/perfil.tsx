@@ -1,21 +1,36 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { CalendarDays, CalendarHeart, Copy, ReceiptText, Users } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useLogout } from "@privy-io/react-auth";
+import {
+  CalendarDays,
+  CalendarHeart,
+  Copy,
+  LogOut,
+  Pen,
+  Plus,
+  ReceiptText,
+  Trash2,
+  Users,
+} from "lucide-react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { ConfirmarPlata } from "@/components/ConfirmarPlata";
 import { EmptyState, RouteError, RoutePending } from "@/components/RouteStates";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { api, createConversationTurnSender, getErrorMessage, queryKeys } from "@/lib/api";
+import { resetSession } from "@/lib/session-isolation";
 import type { Bill, ConfirmableIntent, Contact, ConversationTurnResult } from "@/lib/api-types";
 import {
   runExclusiveConversationAction,
   shouldLockAfterConversationResolution,
   UNKNOWN_CONVERSATION_OUTCOME_MESSAGE,
 } from "@/lib/session-action-lock";
+import { WalletLifecycle } from "@/features/wallet/WalletLifecycle";
 
 const AGENDA_WINDOW_DAYS = 90;
+const isPrivyEnabled = import.meta.env["VITE_IDENTITY_PROVIDER"] === "privy";
 
 /**
  * Se calcula por render, no a nivel de modulo. En un isolate caliente de Cloudflare
@@ -60,8 +75,33 @@ function formatAgendaDate(date: string) {
 }
 
 function contactName(contact: Contact) {
-  return `${contact.displayName} (${contact.relationship.toLocaleLowerCase("es-AR")})`;
+  return contact.name;
 }
+
+function LogoutButton() {
+  const { logout } = useLogout();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  async function handleLogout() {
+    resetSession();
+    queryClient.clear();
+    await logout();
+    void navigate({ to: "/login" });
+  }
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="press shrink-0"
+      onClick={() => void handleLogout()}
+    >
+      <LogOut className="size-5" aria-hidden="true" />
+      Salir
+    </Button>
+  );
+}
+
+type ContactFormState = { mode: "create" } | { mode: "edit"; contact: Contact };
 
 function PerfilPage() {
   const queryClient = useQueryClient();
@@ -71,6 +111,12 @@ function PerfilPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [activeIntent, setActiveIntent] = useState<ConfirmableIntent | null>(null);
   const [agentTurn, setAgentTurn] = useState<ConversationTurnResult | null>(null);
+  const [contactForm, setContactForm] = useState<ContactFormState | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formAddress, setFormAddress] = useState("");
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [contactActionId, setContactActionId] = useState<string | null>(null);
   const [, setConversationId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const sessionActionLockRef = useRef(false);
@@ -95,13 +141,27 @@ function PerfilPage() {
   const { from: agendaFrom, to: agendaTo } = getAgendaWindow();
 
   const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: api.getMe });
-  const contactsQuery = useQuery({ queryKey: queryKeys.contacts, queryFn: api.getContacts });
-  const agendaQuery = useQuery({
-    queryKey: queryKeys.agenda(agendaFrom, agendaTo),
-    queryFn: () => api.getAgenda({ from: agendaFrom, to: agendaTo }),
+  const userId = meQuery.data?.userId;
+  const contactsQuery = useQuery({
+    queryKey: queryKeys.contacts(userId),
+    queryFn: api.getContacts,
+    enabled: Boolean(userId),
   });
-  const billsQuery = useQuery({ queryKey: queryKeys.bills, queryFn: () => api.getBills() });
-  const walletQuery = useQuery({ queryKey: queryKeys.wallet, queryFn: api.getWalletSummary });
+  const agendaQuery = useQuery({
+    queryKey: queryKeys.agenda(userId, agendaFrom, agendaTo),
+    queryFn: () => api.getAgenda({ from: agendaFrom, to: agendaTo }),
+    enabled: Boolean(userId),
+  });
+  const billsQuery = useQuery({
+    queryKey: queryKeys.bills(userId),
+    queryFn: () => api.getBills(),
+    enabled: Boolean(userId),
+  });
+  const walletQuery = useQuery({
+    queryKey: queryKeys.wallet(userId),
+    queryFn: api.getWalletSummary,
+    enabled: Boolean(userId),
+  });
 
   const isPending =
     meQuery.isPending ||
@@ -109,12 +169,11 @@ function PerfilPage() {
     agendaQuery.isPending ||
     billsQuery.isPending ||
     walletQuery.isPending;
-  const firstError =
-    meQuery.error ??
-    contactsQuery.error ??
-    agendaQuery.error ??
-    billsQuery.error ??
-    walletQuery.error;
+  const firstError = meQuery.error ?? contactsQuery.error;
+  // Agenda/bills/wallet-summary are frontend features whose only provider
+  // today is the dev MSW worker; against the real fixture backend they have
+  // no routes yet. Their failures degrade those sections gracefully and
+  // never fail the page (PMU-025 browser E2E runs the real backend).
 
   function refetchAll() {
     void Promise.all([
@@ -126,13 +185,13 @@ function PerfilPage() {
     ]);
   }
 
-  async function copyCbu(contact: Contact) {
+  async function copyContactAddress(contact: Contact) {
     setCopyingContactId(contact.id);
     setCopyStatus(null);
-    let cbu: string;
+    let address: string;
     try {
       const response = await api.revealContactCbu(contact.id);
-      cbu = response.cbu;
+      address = response.address;
     } catch (error) {
       setCopyStatus({
         contactId: contact.id,
@@ -143,17 +202,90 @@ function PerfilPage() {
     }
 
     try {
-      await navigator.clipboard.writeText(cbu);
-      const message = `Copiaste el CBU de ${contact.displayName}`;
+      await navigator.clipboard.writeText(address);
+      const message = `Copiaste la dirección de ${contact.name}`;
       setCopyStatus({ contactId: contact.id, message });
       toast.success(message);
     } catch {
       setCopyStatus({
         contactId: contact.id,
-        message: "El teléfono no pudo copiar el CBU. Probá de nuevo.",
+        message: "El teléfono no pudo copiar la dirección. Probá de nuevo.",
       });
     } finally {
       setCopyingContactId(null);
+    }
+  }
+
+  function openCreateContact() {
+    setContactForm({ mode: "create" });
+    setFormName("");
+    setFormDescription("");
+    setFormAddress("");
+    setContactError(null);
+  }
+
+  function openEditContact(contact: Contact) {
+    setContactForm({ mode: "edit", contact });
+    setFormName(contact.name);
+    setFormDescription(contact.description);
+    setFormAddress(contact.address);
+    setContactError(null);
+  }
+
+  function closeContactForm() {
+    setContactForm(null);
+    setContactError(null);
+  }
+
+  async function saveContact(event: FormEvent) {
+    event.preventDefault();
+    const name = formName.trim();
+    const description = formDescription.trim();
+    const address = formAddress.trim();
+    if (!name) {
+      setContactError("Poné un nombre.");
+      return;
+    }
+    if (!address) {
+      setContactError("Poné la dirección o el CBU.");
+      return;
+    }
+    setContactError(null);
+    const actionId = contactForm?.mode === "edit" ? contactForm.contact.id : "new";
+    setContactActionId(actionId);
+    try {
+      if (contactForm?.mode === "edit") {
+        await api.updateContact(contactForm.contact.id, {
+          name,
+          description,
+          address,
+          expectedVersion: contactForm.contact.version,
+        });
+        toast.success(`Actualizamos a ${name}.`);
+      } else {
+        await api.createContact({ name, description, address });
+        toast.success(`Guardamos a ${name}.`);
+      }
+      setContactForm(null);
+      void contactsQuery.refetch();
+    } catch (error) {
+      setContactError(getErrorMessage(error));
+    } finally {
+      setContactActionId(null);
+    }
+  }
+
+  async function deleteContact(contact: Contact) {
+    setContactActionId(contact.id);
+    setContactError(null);
+    try {
+      await api.deleteContact(contact.id);
+      toast.success(`Sacamos a ${contact.name} de tu familia guardada.`);
+      void contactsQuery.refetch();
+    } catch (error) {
+      setContactError(getErrorMessage(error));
+    } finally {
+      setContactActionId(null);
     }
   }
 
@@ -234,9 +366,9 @@ function PerfilPage() {
   }
 
   function refreshMoneyQueries() {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.movements });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bills });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.movements(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bills(userId) });
   }
 
   function closeReceipt() {
@@ -256,40 +388,100 @@ function PerfilPage() {
 
   if (isPending) return <RoutePending label="Estamos buscando tu perfil y tu agenda" />;
   if (firstError) return <RouteError error={firstError} onRetry={refetchAll} />;
-  if (
-    !meQuery.data ||
-    !contactsQuery.data ||
-    !agendaQuery.data ||
-    !billsQuery.data ||
-    !walletQuery.data
-  ) {
+  // Only identity + contacts are real-backend requirements. Agenda/bills/
+  // wallet-summary come from the dev MSW worker today; against the real
+  // fixture backend they have no routes yet, so they degrade to empty
+  // sections instead of blocking the page (PMU-025 browser E2E).
+  if (!meQuery.data || !contactsQuery.data) {
     return <RoutePending label="Estamos buscando tu perfil y tu agenda" />;
   }
 
   const me = meQuery.data;
   const contacts = contactsQuery.data;
-  const events = agendaQuery.data;
-  const bills = billsQuery.data;
+  // Degraded defaults when the MSW-only features have no real backend.
+  const events = agendaQuery.data ?? [];
+  const bills = billsQuery.data ?? [];
 
   return (
     <main className="mx-auto max-w-md px-6 pt-12 pb-40">
       <section className="surface-card flex items-center gap-4 p-5">
         <div className="plastic flex size-16 shrink-0 items-center justify-center rounded-full text-2xl font-extrabold">
-          {me.initials}
+          {me.displayName ? me.displayName.charAt(0).toLocaleUpperCase("es-AR") : "N"}
         </div>
-        <div>
-          <h1 className="text-2xl font-extrabold">{me.displayName}</h1>
-          <p className="mt-1 text-base text-muted-foreground">
-            DNI terminado en {me.documentLast3}
-          </p>
-          <p className="text-base text-muted-foreground">{me.city}</p>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-2xl font-extrabold">{me.displayName ?? "Tu perfil"}</h1>
+          <p className="mt-1 text-base text-muted-foreground">Usuario {me.userId.slice(0, 8)}…</p>
         </div>
+        {isPrivyEnabled ? <LogoutButton /> : null}
       </section>
+
+      <WalletLifecycle userId={userId} />
 
       <h2 className="mt-10 flex items-center gap-2 text-xl font-extrabold">
         <Users className="size-6 text-brand-ink" strokeWidth={2.4} aria-hidden="true" /> Mi familia
         guardada
       </h2>
+      <Button
+        type="button"
+        variant="outline"
+        className="press mt-3 min-h-12 w-full text-base font-extrabold"
+        onClick={openCreateContact}
+      >
+        <Plus className="size-5" aria-hidden="true" /> Agregar una persona
+      </Button>
+
+      {contactForm ? (
+        <form onSubmit={saveContact} className="surface-card mt-4 space-y-3 p-4">
+          <h3 className="text-lg font-extrabold">
+            {contactForm.mode === "edit" ? "Editar persona" : "Agregar persona"}
+          </h3>
+          <Input
+            value={formName}
+            onChange={(event) => setFormName(event.target.value)}
+            placeholder="Nombre"
+            aria-label="Nombre"
+          />
+          <Input
+            value={formDescription}
+            onChange={(event) => setFormDescription(event.target.value)}
+            placeholder="¿Quién es? (opcional)"
+            aria-label="Descripción"
+          />
+          <Input
+            value={formAddress}
+            onChange={(event) => setFormAddress(event.target.value)}
+            placeholder="CBU o dirección"
+            aria-label="CBU o dirección"
+          />
+          {contactError ? (
+            <p className="text-base font-bold text-destructive" role="alert">
+              {contactError}
+            </p>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="press min-h-12 font-extrabold"
+              onClick={closeContactForm}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              className="press min-h-12 font-extrabold"
+              disabled={
+                contactActionId === (contactForm.mode === "edit" ? contactForm.contact.id : "new")
+              }
+            >
+              {contactActionId === (contactForm.mode === "edit" ? contactForm.contact.id : "new")
+                ? "Guardando"
+                : "Guardar"}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
       {contacts.length === 0 ? (
         <EmptyState>
           Todavía no tenés familiares guardados. Cuando agregues uno, va a aparecer acá.
@@ -298,25 +490,46 @@ function PerfilPage() {
         <ul className="mt-4 space-y-3">
           {contacts.map((contact) => (
             <li key={contact.id} className="surface-card p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="text-lg font-bold">{contactName(contact)}</p>
-                  <p className="mt-1 break-words text-base text-muted-foreground">
-                    {contact.alias ?? "Sin alias guardado"}
-                  </p>
-                  <p className="text-base text-muted-foreground">
-                    CBU terminado en {contact.cbuLast4}
+                  {contact.description ? (
+                    <p className="mt-1 break-words text-base text-muted-foreground">
+                      {contact.description}
+                    </p>
+                  ) : null}
+                  <p className="mt-1 break-all text-base text-muted-foreground">
+                    {contact.address}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="press shrink-0 rounded-xl bg-secondary p-4 text-secondary-foreground"
-                  aria-label={`Copiar CBU de ${contact.displayName}`}
-                  onClick={() => void copyCbu(contact)}
-                  disabled={copyingContactId === contact.id}
-                >
-                  <Copy className="size-6" strokeWidth={2.4} aria-hidden="true" />
-                </button>
+                <div className="flex shrink-0 flex-col gap-2">
+                  <button
+                    type="button"
+                    className="press rounded-xl bg-secondary p-4 text-secondary-foreground"
+                    aria-label={`Copiar dirección de ${contact.name}`}
+                    onClick={() => void copyContactAddress(contact)}
+                    disabled={copyingContactId === contact.id}
+                  >
+                    <Copy className="size-6" strokeWidth={2.4} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="press rounded-xl bg-secondary p-4 text-secondary-foreground"
+                    aria-label={`Editar a ${contact.name}`}
+                    onClick={() => openEditContact(contact)}
+                  >
+                    <Pen className="size-6" strokeWidth={2.4} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="press rounded-xl bg-destructive-surface p-4 text-destructive-surface-foreground"
+                    aria-label={`Eliminar a ${contact.name}`}
+                    onClick={() => void deleteContact(contact)}
+                    disabled={contactActionId === contact.id}
+                  >
+                    <Trash2 className="size-6" strokeWidth={2.4} aria-hidden="true" />
+                  </button>
+                </div>
               </div>
               {copyStatus?.contactId === contact.id ? (
                 <p className="mt-3 text-base font-bold" role="status">

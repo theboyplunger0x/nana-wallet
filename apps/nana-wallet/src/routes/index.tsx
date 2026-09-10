@@ -172,11 +172,12 @@ function AgentePage() {
   );
 
   const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: api.getMe });
+  const userId = meQuery.data?.userId;
 
   function refreshMoneyQueries() {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.movements });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bills });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.wallet(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.movements(userId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bills(userId) });
   }
 
   function lockUnknownOutcome() {
