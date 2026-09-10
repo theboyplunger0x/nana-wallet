@@ -43,7 +43,10 @@ import {
   getConfiguredRecipientMemoryRuntime,
   getMemoryRuntimeForUser,
 } from "./memory/runtime.js";
-import { EmbeddedWalletService, WalletUnavailableError } from "./wallet/embedded.js";
+import {
+  EmbeddedWalletService,
+  WalletUnavailableError,
+} from "./wallet/embedded.js";
 import {
   WalletBalancesService,
   createBalanceReader,

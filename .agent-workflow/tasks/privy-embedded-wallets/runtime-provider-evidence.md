@@ -5,10 +5,11 @@ Scope: complete existing wallet functionality for authenticated Privy users. Exi
 Read-only provider checks executed with vault-env (no values printed): GET /wallets HTTP200, zero wallets; GET /users paginated two requests, one user, zero Privy embedded Ethereum linked accounts. No live wallet creation or transfers performed. Public Arc RPC eth_chainId5042002 and USDC decimals6 verified.
 
 Authoritative current references:
-- https://docs.privy.io/api-reference/wallets/get-all : user filter is user_id, not owner. Pagination uses next_cursor.
-- https://docs.privy.io/api-reference/wallets/get : wallet returns owner_id (key quorum), additional_signers, entity. A fabricated owner DID field is not sufficient contract evidence.
-- https://docs.privy.io/controls/policies/stateful-policies : app-scoped aggregation; at most10 aggregations, rolling window minimum3600sec; documented group_by sources are request-derived. Per-wallet identity partitioning remains unproven.
-- https://docs.privy.io/api-reference/aggregations/create : EthereumTransactionConditionField enum is to,value,chain_id. Prior gas condition is unsupported by this documented schema; recipient array must use in rather than condition-set reference operator. Existing enrollment payload cannot be treated as effective provider protection.
+
+- <https://docs.privy.io/api-reference/wallets/get-all> : user filter is user_id, not owner. Pagination uses next_cursor.
+- <https://docs.privy.io/api-reference/wallets/get> : wallet returns owner_id (key quorum), additional_signers, entity. A fabricated owner DID field is not sufficient contract evidence.
+- <https://docs.privy.io/controls/policies/stateful-policies> : app-scoped aggregation; at most10 aggregations, rolling window minimum3600sec; documented group_by sources are request-derived. Per-wallet identity partitioning remains unproven.
+- <https://docs.privy.io/api-reference/aggregations/create> : EthereumTransactionConditionField enum is to,value,chain_id. Prior gas condition is unsupported by this documented schema; recipient array must use in rather than condition-set reference operator. Existing enrollment payload cannot be treated as effective provider protection.
 
 Implementation can safely complete real user-scoped reads and reject transfers explicitly until provider protections are established. Do not replace user-required Privy-only limits with local SQL caps or claim signing ready on fixture policy tests. No shared funded/demo fallback for Privy identities.
 

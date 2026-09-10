@@ -38,7 +38,10 @@ function databaseFixture(
   >,
 ): DatabaseClient {
   return {
-    async withUserTransaction(userId: string, operation: (client: unknown) => Promise<unknown>) {
+    async withUserTransaction(
+      userId: string,
+      operation: (client: unknown) => Promise<unknown>,
+    ) {
       return operation({
         query: async () => ({ rows: rows[userId] ? [rows[userId]] : [] }),
       });
@@ -46,7 +49,9 @@ function databaseFixture(
   } as unknown as DatabaseClient;
 }
 
-function privyFixture(walletsByDid: Record<string, ReturnType<typeof wallet>[]>) {
+function privyFixture(
+  walletsByDid: Record<string, ReturnType<typeof wallet>[]>,
+) {
   return new PrivyServerClient({
     appId: "app-test",
     appSecret: "secret-test",

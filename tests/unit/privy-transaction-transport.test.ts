@@ -47,8 +47,7 @@ const readyPolicy: PrivyPolicyReadiness = {
   rollingWindowSeconds: 3600,
 };
 
-const expectedCalldata: `0x${string}` =
-  `0xa9059cbb${"0".repeat(24)}${RECIPIENT.slice(2)}${"989680".padStart(64, "0")}`;
+const expectedCalldata: `0x${string}` = `0xa9059cbb${"0".repeat(24)}${RECIPIENT.slice(2)}${"989680".padStart(64, "0")}`;
 
 const decoded: DecodedSignedTransaction = {
   from: FROM,
@@ -62,14 +61,19 @@ const decoded: DecodedSignedTransaction = {
   maxPriorityFeePerGas: 1_000_000_000n,
 };
 
-function makeTransport(options: {
-  policy?: PrivyPolicyReadiness;
-  decoded?: DecodedSignedTransaction;
-  hash?: `0x${string}`;
-  fetch?: typeof fetch;
-  rpcRequest?: (method: string, params: readonly unknown[]) => Promise<unknown>;
-  rpcTimeoutMs?: number;
-} = {}) {
+function makeTransport(
+  options: {
+    policy?: PrivyPolicyReadiness;
+    decoded?: DecodedSignedTransaction;
+    hash?: `0x${string}`;
+    fetch?: typeof fetch;
+    rpcRequest?: (
+      method: string,
+      params: readonly unknown[],
+    ) => Promise<unknown>;
+    rpcTimeoutMs?: number;
+  } = {},
+) {
   const authorizationSigner = vi.fn(
     async (_input: {
       input: PrivyAuthorizationSignatureInput;
@@ -86,14 +90,15 @@ function makeTransport(options: {
   );
   const fetchImpl =
     options.fetch ??
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          method: "eth_signTransaction",
-          data: { signed_transaction: RAW, encoding: "rlp" },
-        }),
-        { status: 200 },
-      ),
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            method: "eth_signTransaction",
+            data: { signed_transaction: RAW, encoding: "rlp" },
+          }),
+          { status: 200 },
+        ),
     );
   const transport = new PrivyTransactionTransport({
     appId: "app-test",
@@ -192,9 +197,9 @@ describe("PrivyTransactionTransport", () => {
       ...decoded,
       from: wallet.address,
     });
-    expect(ethersSignedTransactionCodec.transactionHash(rawTransaction)).toMatch(
-      /^0x[0-9a-f]{64}$/u,
-    );
+    expect(
+      ethersSignedTransactionCodec.transactionHash(rawTransaction),
+    ).toMatch(/^0x[0-9a-f]{64}$/u);
     expect(ethersSignedTransactionCodec.transactionHash(rawTransaction)).toBe(
       ethersSignedTransactionCodec.transactionHash(rawTransaction),
     );
@@ -212,17 +217,18 @@ describe("PrivyTransactionTransport", () => {
   });
 
   it("issues bounded JSON-RPC 2.0 requests", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: HASH })),
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: HASH })),
     );
     const rpc = new JsonRpcHttpClient(
       "https://rpc.test.invalid",
       fetchImpl,
       250,
     );
-    await expect(
-      rpc.request("eth_sendRawTransaction", [RAW]),
-    ).resolves.toBe(HASH);
+    await expect(rpc.request("eth_sendRawTransaction", [RAW])).resolves.toBe(
+      HASH,
+    );
     const request = fetchImpl.mock.calls[0]?.[1];
     expect(JSON.parse(String(request?.body))).toEqual({
       jsonrpc: "2.0",
@@ -248,20 +254,24 @@ describe("PrivyTransactionTransport", () => {
   it.each([
     ["wrong chain", "0x1", "0x6"],
     ["wrong decimals", "0x4cef52", "0x12"],
-  ])("blocks signing when the exact RPC reports %s", async (_label, chain, decimals) => {
-    const { transport, authorizationSigner, fetchImpl } = makeTransport({
-      rpcRequest: async (method) =>
-        method === "eth_chainId" ? chain : decimals,
-    });
-    await expect(transport.signTransfer(intent)).rejects.toMatchObject({
-      reason: "rpc_readiness",
-    });
-    expect(authorizationSigner).not.toHaveBeenCalled();
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
+  ])(
+    "blocks signing when the exact RPC reports %s",
+    async (_label, chain, decimals) => {
+      const { transport, authorizationSigner, fetchImpl } = makeTransport({
+        rpcRequest: async (method) =>
+          method === "eth_chainId" ? chain : decimals,
+      });
+      await expect(transport.signTransfer(intent)).rejects.toMatchObject({
+        reason: "rpc_readiness",
+      });
+      expect(authorizationSigner).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
 
   it("signs the exact Privy request envelope and verifies returned bytes", async () => {
-    const { transport, authorizationSigner, fetchImpl, codec } = makeTransport();
+    const { transport, authorizationSigner, fetchImpl, codec } =
+      makeTransport();
 
     await expect(transport.signTransfer(intent)).resolves.toEqual({
       rawTransaction: RAW,
@@ -319,27 +329,31 @@ describe("PrivyTransactionTransport", () => {
     ["gas_limit", { gasLimit: 79_999n }],
     ["max_fee_per_gas", { maxFeePerGas: 3n }],
     ["max_priority_fee_per_gas", { maxPriorityFeePerGas: 3n }],
-  ])("rejects a signed transaction with mismatched %s", async (reason, patch) => {
-    const { transport } = makeTransport({
-      decoded: { ...decoded, ...patch },
-    });
-    const result = transport.signTransfer(intent);
-    await expect(result).rejects.toBeInstanceOf(
-      PrivyTransactionQuarantinedError,
-    );
-    await expect(result).rejects.toMatchObject({
-      reason,
-      retrySafe: false,
-      signedTransactionHash: HASH,
-    });
-  });
+  ])(
+    "rejects a signed transaction with mismatched %s",
+    async (reason, patch) => {
+      const { transport } = makeTransport({
+        decoded: { ...decoded, ...patch },
+      });
+      const result = transport.signTransfer(intent);
+      await expect(result).rejects.toBeInstanceOf(
+        PrivyTransactionQuarantinedError,
+      );
+      await expect(result).rejects.toMatchObject({
+        reason,
+        retrySafe: false,
+        signedTransactionHash: HASH,
+      });
+    },
+  );
 
   it("broadcasts the exact verified bytes and requires the deterministic hash", async () => {
     const { transport, rpcRequest } = makeTransport();
     const transaction = await transport.signTransfer(intent);
-    await expect(
-      transport.broadcast(transaction),
-    ).resolves.toEqual({ status: "submitted", transactionHash: HASH });
+    await expect(transport.broadcast(transaction)).resolves.toEqual({
+      status: "submitted",
+      transactionHash: HASH,
+    });
     expect(rpcRequest).toHaveBeenCalledWith("eth_sendRawTransaction", [RAW]);
   });
 
@@ -401,10 +415,7 @@ describe("PrivyTransactionTransport", () => {
       { transactionHash: HASH, blockNumber: "0x2a", status: "0x1" },
       "confirmed",
     ],
-    [
-      { transactionHash: HASH, blockNumber: "0x2a", status: "0x0" },
-      "reverted",
-    ],
+    [{ transactionHash: HASH, blockNumber: "0x2a", status: "0x0" }, "reverted"],
   ])("reconciles receipt %j as %s", async (receipt, status) => {
     const { transport } = makeTransport({
       rpcRequest: async (method) => rpcReadinessResult(method) ?? receipt,
@@ -461,7 +472,9 @@ describe("PrivyTransactionTransport", () => {
     await expect(transport.broadcast(transaction)).rejects.toMatchObject({
       reason: "rpc_readiness",
     });
-    expect(rpcRequest).not.toHaveBeenCalledWith("eth_sendRawTransaction", [RAW]);
+    expect(rpcRequest).not.toHaveBeenCalledWith("eth_sendRawTransaction", [
+      RAW,
+    ]);
   });
 
   it("does not expose configured secret material in provider failures", async () => {
@@ -481,7 +494,9 @@ describe("PrivyTransactionTransport", () => {
 
   it("treats a server error after signing as an ambiguous lost response", async () => {
     const { transport } = makeTransport({
-      fetch: vi.fn(async () => new Response("gateway failure", { status: 500 })),
+      fetch: vi.fn(
+        async () => new Response("gateway failure", { status: 500 }),
+      ),
     });
     await expect(transport.signTransfer(intent)).rejects.toMatchObject({
       stage: "sign",

@@ -23,8 +23,7 @@ function userProvider(address: string, atomicBalance: bigint) {
           return `0x${PRIVY_ARC_CHAIN_ID.toString(16)}`;
         if (
           method === "eth_call" &&
-          (params?.[0] as { data?: string } | undefined)?.data ===
-            "0x313ce567"
+          (params?.[0] as { data?: string } | undefined)?.data === "0x313ce567"
         )
           return "0x6";
         if (method === "eth_call") return `0x${atomicBalance.toString(16)}`;

@@ -22,8 +22,7 @@ import {
 export const PRIVY_ARC_NETWORK = "arc-testnet";
 export const PRIVY_ARC_CHAIN_ID = 5_042_002n;
 export const PRIVY_ARC_RPC_URL = "https://rpc.testnet.arc.io";
-export const PRIVY_ARC_USDC =
-  "0x3600000000000000000000000000000000000000";
+export const PRIVY_ARC_USDC = "0x3600000000000000000000000000000000000000";
 export const PRIVY_ARC_USDC_DECIMALS = 6;
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/u;

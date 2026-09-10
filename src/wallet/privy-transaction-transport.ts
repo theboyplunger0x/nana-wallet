@@ -406,8 +406,12 @@ function assertDecodedMatches(
   }
 }
 
-function readJsonRpcReceipt(value: unknown, expectedHash: Hex): ReconciliationResult {
-  if (value === null) return { status: "pending", transactionHash: expectedHash };
+function readJsonRpcReceipt(
+  value: unknown,
+  expectedHash: Hex,
+): ReconciliationResult {
+  if (value === null)
+    return { status: "pending", transactionHash: expectedHash };
   if (!value || typeof value !== "object") {
     throw new PrivyTransactionUncertainError("reconcile", expectedHash);
   }
@@ -431,7 +435,10 @@ function readJsonRpcReceipt(value: unknown, expectedHash: Hex): ReconciliationRe
   };
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error("Operation deadline exceeded.")),
@@ -461,11 +468,14 @@ export class PrivyTransactionTransport {
   private readonly requestExpiryMs: number;
   private readonly fetchTimeoutMs: number;
   private readonly rpcTimeoutMs: number;
-  private readonly verifiedTransactions = new WeakSet<VerifiedSignedTransaction>();
+  private readonly verifiedTransactions =
+    new WeakSet<VerifiedSignedTransaction>();
 
   public constructor(private readonly config: PrivyTransactionTransportConfig) {
     if (!config.appId || !config.appSecret || !config.authorizationPrivateKey) {
-      throw new Error("Privy transaction transport configuration is incomplete.");
+      throw new Error(
+        "Privy transaction transport configuration is incomplete.",
+      );
     }
     this.baseUrl = (config.privyBaseUrl ?? "https://api.privy.io/v1").replace(
       /\/$/u,
@@ -632,7 +642,10 @@ export class PrivyTransactionTransport {
       throw new PrivyTransactionUncertainError("sign");
     }
 
-    return this.verifySignedTransfer(signedTransaction.signed_transaction, intent);
+    return this.verifySignedTransfer(
+      signedTransaction.signed_transaction,
+      intent,
+    );
   }
 
   /**
@@ -724,7 +737,10 @@ export class PrivyTransactionTransport {
         transaction.transactionHash,
       );
     }
-    return { status: "submitted", transactionHash: transaction.transactionHash };
+    return {
+      status: "submitted",
+      transactionHash: transaction.transactionHash,
+    };
   }
 
   public async reconcile(
