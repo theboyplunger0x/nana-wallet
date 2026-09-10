@@ -1,11 +1,16 @@
 import { generateKeyPairSync, createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SignJWT } from "jose";
 import { buildServer } from "../../src/server.js";
 import {
   createDatabaseClient,
   type DatabaseClient,
 } from "../../src/db/client.js";
+import {
+  PrivyServerClient,
+  type PrivyFetch,
+  type PrivyWalletRecord,
+} from "../../src/wallet/privy-server-client.js";
 
 /**
  * WP-003..WP-009 + WP-013: personal balances over real HTTP with Postgres/RLS.
@@ -45,6 +50,51 @@ function fixtureAddress(userId: string): string {
 const USER_A_DID = "did:privy:balances-user-a";
 const USER_B_DID = "did:privy:balances-user-b";
 
+/**
+ * The merged per-user Privy runtime requires a trusted server client in privy
+ * mode. This mock serves each test DID an embedded wallet at the SAME
+ * deterministic fixture address the client-side hash function predicts, so the
+ * BALANCE_FIXTURE_BALANCES map still matches without any live provider.
+ */
+function walletRecordFor(did: string, address: string): PrivyWalletRecord {
+  return {
+    id: `provider-wallet-${did.replace(/[^a-z0-9]/gi, "-")}`,
+    address,
+    chain_type: "ethereum",
+    policy_ids: [],
+    owner_id: did,
+    additional_signers: [],
+    archived_at: null,
+  };
+}
+
+function mockServerClient(
+  dids: string[],
+  addresses: string[],
+): PrivyServerClient {
+  const byDid = new Map(
+    dids.map((did, index) => [did, walletRecordFor(did, addresses[index]!)]),
+  );
+  const fetchMock = vi.fn<PrivyFetch>(async (url) => {
+    const did = decodeURIComponent(
+      (url.match(/user_id=([^&]+)/) ?? [])[1] ?? "",
+    );
+    const record = byDid.get(did);
+    return {
+      ok: Boolean(record),
+      status: record ? 200 : 404,
+      json: () =>
+        Promise.resolve(record ? { data: [record] } : { error: "not_found" }),
+    };
+  });
+  return new PrivyServerClient({
+    appId: "test-balances-app",
+    appSecret: "test-balances-secret",
+    baseUrl: "https://mock.privy.test/v1",
+    fetch: fetchMock,
+  });
+}
+
 suite("GET /v1/wallets/current/balances (WP-003..WP-009, WP-013)", () => {
   let database: DatabaseClient;
   let app: Awaited<ReturnType<typeof buildServer>>;
@@ -82,7 +132,12 @@ suite("GET /v1/wallets/current/balances (WP-003..WP-009, WP-013)", () => {
     });
     delete process.env.DEMO_USER_ID;
 
-    app = buildServer();
+    app = buildServer({
+      privyServer: mockServerClient(
+        [USER_A_DID, USER_B_DID, "did:privy:balances-user-c"],
+        [addressA, addressB, fixtureAddress("c-unused")],
+      ),
+    });
     await app.ready();
   });
 
@@ -210,15 +265,20 @@ suite("GET /v1/wallets/current/balances (WP-003..WP-009, WP-013)", () => {
   });
 
   it("leaves bindings, grants and operations untouched by reads (WP-008)", async () => {
+    // Counts are scoped to this test's own rows: the full suite runs workers in
+    // parallel against the same database, so global counts are noisy.
     const counts = async () => {
       const wallets = await database.query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM user_wallets",
+        "SELECT count(*)::text AS count FROM user_wallets WHERE user_id = $1",
+        [userIdA],
       );
       const grants = await database.query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM signer_grants",
+        "SELECT count(*)::text AS count FROM signer_grants WHERE user_id = $1",
+        [userIdA],
       );
       const operations = await database.query<{ count: string }>(
-        "SELECT count(*)::text AS count FROM wallet_operations",
+        "SELECT count(*)::text AS count FROM wallet_operations WHERE user_id = $1",
+        [userIdA],
       );
       return {
         wallets: wallets.rows[0]!.count,
