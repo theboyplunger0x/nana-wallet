@@ -68,6 +68,11 @@ export function composeConfig(provider, env) {
     LIVEKIT_AGENT_RUNTIME: 'native-livekit', AGENT_RUNTIME: 'llm',
     LIVEKIT_RECORDING_ENABLED: 'false', AGENT_OBSERVABILITY_RECORDING: 'false',
     XDG_CONFIG_HOME: '/wdk-config', CORS_ORIGINS: origin,
+    // wallet-profile (WP-003..WP-009): the personal balance endpoint reads the Arc
+    // testnet USDC ERC-20. Without this the reader keeps its `fixture` default with
+    // an empty map, so every `ready` wallet fails closed with 503
+    // BALANCE_NO_DISPONIBLE. Same endpoint the code pins as PRIVY_ARC_RPC_URL.
+    BALANCE_READ_SOURCE: 'rpc', BALANCE_RPC_URL: 'https://rpc.testnet.arc.io',
   };
   for (const name of ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVE_VOICE_BINDING_PUBLIC_KEY', 'OPENAI_API_KEY', 'OPENCODE_GO_API_KEY', 'WDK_INDEXER_API_KEY', ...(provider === 'circle-arc' ? ['CIRCLE_API_KEY', 'CIRCLE_ENTITY_SECRET', 'CIRCLE_SENDER_WALLET_ID'] : [])]) environment[name] = ref(name);
   const build = { context: root, dockerfile: 'Dockerfile' };

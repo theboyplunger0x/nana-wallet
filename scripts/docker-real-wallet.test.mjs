@@ -51,6 +51,10 @@ test('Circle exige integración y fija red/token en ambos procesos', () => {
       assert.equal(config.services[name].environment.WDK_NETWORK, 'arc-testnet');
       assert.equal(config.services[name].environment.WDK_TOKEN, 'USDC');
       assert.equal(config.services[name].environment.WDK_TOOLS_SOURCE, 'circle-arc');
+      // Without these the balance reader keeps its `fixture` default with an empty
+      // map, so every `ready` wallet fails closed with 503 BALANCE_NO_DISPONIBLE.
+      assert.equal(config.services[name].environment.BALANCE_READ_SOURCE, 'rpc');
+      assert.equal(config.services[name].environment.BALANCE_RPC_URL, 'https://rpc.testnet.arc.io');
     }
     assert.equal(config.services['wdk-daemon'], undefined);
     assert.ok(!JSON.stringify(config).includes('synthetic-circle'));
