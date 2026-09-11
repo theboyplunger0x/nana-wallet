@@ -62,6 +62,12 @@ services:
       CORS_ORIGINS: https://nana-privy.localhost
       AGENT_RUNTIME: llm
       OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?}
+      # WP-003..WP-009: GET /v1/wallets/current/balances reads the Arc testnet
+      # USDC ERC-20. Without this the reader stays on its `fixture` default with an
+      # empty map, so every `ready` wallet fails closed with 503
+      # BALANCE_NO_DISPONIBLE. Same endpoint as PRIVY_ARC_RPC_URL in code.
+      BALANCE_READ_SOURCE: rpc
+      BALANCE_RPC_URL: https://rpc.testnet.arc.io
     ports: ["127.0.0.1::3000"]
     volumes:
       - ${PRIVY_SOURCE_DIR:-.}/src:/app/src:ro
