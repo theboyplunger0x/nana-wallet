@@ -10,7 +10,7 @@ const ENGLISH_WORDS = /\b(hello|balance|send|transfer|confirm|cancel|thanks|want
  */
 export function detectConversationLanguage(
   text: string,
-  previous: ConversationLanguage = 'es',
+  previous: ConversationLanguage = 'en',
 ): ConversationLanguage {
   const normalized = text.trim();
   if (!normalized) return previous;
