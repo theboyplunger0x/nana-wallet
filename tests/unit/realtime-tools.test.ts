@@ -36,6 +36,20 @@ function financialTool(toolDef: unknown, index: number): FinancialTool {
   return { name, parameters: def.parameters, execute: def.execute };
 }
 
+/** The model-facing get_balance payload: the 2-decimal amount plus its spoken form. */
+type BalanceToolResult = {
+  network: string;
+  token: string;
+  address: string;
+  balance: string;
+  balanceSpoken: string;
+};
+
+function balanceTool(toolDef: unknown): (input?: unknown) => Promise<BalanceToolResult> {
+  const execute = (toolDef as unknown as { execute: (input: unknown) => Promise<BalanceToolResult> }).execute;
+  return (input: unknown = {}) => execute(input);
+}
+
 describe("createRealtimeTools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,7 +73,7 @@ describe("createRealtimeTools", () => {
     expect(params).toBeDefined();
     expect(params.parse({})).toEqual({});
 
-    const result = await (getBalanceTool.execute as unknown as (input: unknown) => Promise<{ balance: string }>)({});
+    const result = await balanceTool(getBalanceTool)();
 
     expect(h.getBalance).toHaveBeenCalledWith({
       network: "sepolia",
@@ -69,7 +83,8 @@ describe("createRealtimeTools", () => {
     expect(result).toMatchObject({
       network: "sepolia",
       token: "USDT",
-      balance: "42.5",
+      balance: "42.50",
+      balanceSpoken: "forty-two USDT and fifty cents",
     });
   });
 
@@ -348,5 +363,84 @@ yield { type: "turn-completed", result: { status: "cancelled", message: "Transfe
       decision: "cancel",
     }));
     expect(result).toMatchObject({ status: "cancelled" });
+  });
+
+  it("rounds the provider balance to two decimals and spells it out for the voice model", async () => {
+    const getBalance = vi.fn(async () => ({
+      network: "sepolia",
+      token: "USDC",
+      address: "0x1234000000000000000000000000000000abcd",
+      balance: "97.989332609300122852",
+    }));
+    const [getBalanceTool] = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: { getBalance } as never,
+    });
+
+    const result = await balanceTool(getBalanceTool)();
+
+    // The 24-character provider decimal never reaches the model: no digit-by-digit read.
+    expect(result).toEqual({
+      network: "sepolia",
+      token: "USDC",
+      address: "0x1234000000000000000000000000000000abcd",
+      balance: "97.99",
+      balanceSpoken: "ninety-seven USDC and ninety-nine cents",
+    });
+  });
+
+  it("speaks the balance in the persisted conversation language", async () => {
+    const conversations = { get: vi.fn(async () => ({ language: "es" })) };
+    const [getBalanceTool] = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: { getBalance: h.getBalance } as never,
+      conversations: conversations as never,
+    });
+
+    const result = await balanceTool(getBalanceTool)();
+
+    expect(conversations.get).toHaveBeenCalledWith("binding-user", "conv-1");
+    expect(result.balanceSpoken).toBe("cuarenta y dos USDT con cincuenta centavos");
+  });
+
+  it("defaults the spoken balance to English when the language cannot be resolved", async () => {
+    const failing = {
+      get: vi.fn(async () => {
+        throw new Error("conversation store unavailable");
+      }),
+    };
+    const unknownConversation = { get: vi.fn(async () => undefined) };
+    const [withFailure] = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: { getBalance: h.getBalance } as never,
+      conversations: failing as never,
+    });
+    const [withoutConversation] = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: { getBalance: h.getBalance } as never,
+      conversations: unknownConversation as never,
+    });
+    const [withoutRepository] = createRealtimeTools({
+      conversationId: "conv-1",
+      userId: "binding-user",
+      wallet: { getBalance: h.getBalance } as never,
+    });
+
+    await expect(balanceTool(withFailure)()).resolves.toMatchObject({
+      balance: "42.50",
+      balanceSpoken: "forty-two USDT and fifty cents",
+    });
+    await expect(balanceTool(withoutConversation)()).resolves.toMatchObject({
+      balance: "42.50",
+      balanceSpoken: "forty-two USDT and fifty cents",
+    });
+    await expect(balanceTool(withoutRepository)()).resolves.toMatchObject({
+      balance: "42.50",
+      balanceSpoken: "forty-two USDT and fifty cents",
+    });
   });
 });

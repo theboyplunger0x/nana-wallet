@@ -1,6 +1,8 @@
 import { tool } from "@livekit/agents";
 import { z } from "zod";
+import { formatBalanceForAgent } from "../../agent/balance-format.js";
 import { getWalletAgentConfig } from "../../agent/instructions.js";
+import type { ConversationLanguage } from "../../conversations/language.js";
 import type { RecipientMemoryService, RecipientSearchResult } from "../../memory/service.js";
 import type { RecipientCandidate } from "../../memory/types.js";
 import type { WalletProvider } from "../../wallet/provider.js";
@@ -58,6 +60,12 @@ export type RealtimeBalanceResult = {
   token: string;
   address: string;
   balance: string;
+  /**
+   * The same amount written out in words in the conversation language, so the voice
+   * model narrates "forty-two USDC and fifty cents" instead of reading the provider's
+   * raw decimal digit by digit.
+   */
+  balanceSpoken: string;
 };
 
 /**
@@ -168,6 +176,30 @@ function toVoiceToolResult(result: ConversationTurnResult): RealtimeVoiceToolRes
 }
 
 /**
+ * Resolve the language the balance should be spoken in.
+ *
+ * The voice path has no `context.language`: it runs outside the text agent, so the
+ * language is read from the conversation snapshot the worker already binds per room.
+ * A missing repository, an unknown conversation, or a repository failure all fall back
+ * to English — never to a mixed-language narration — and a balance read must never
+ * fail because the language lookup did.
+ */
+async function resolveConversationLanguage(
+  dependencies: RealtimeToolsDependencies,
+): Promise<ConversationLanguage> {
+  if (!dependencies.conversations) return "en";
+  try {
+    const snapshot = await dependencies.conversations.get(
+      dependencies.userId,
+      dependencies.conversationId,
+    );
+    return snapshot?.language === "es" ? "es" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+/**
  * Builds the realtime voice tools bound to one conversation. Tools are closures over
  * the deps so each room gets the correct wallet/tenant/service without global lookups.
  */
@@ -180,16 +212,28 @@ export function createRealtimeTools(dependencies: RealtimeToolsDependencies) {
       "Returns the current balance of the connected wallet for the default token. Takes no input.",
     parameters: z.object({}),
     execute: async (): Promise<RealtimeBalanceResult> => {
-      const balance = await dependencies.wallet.getBalance({
-        network: config.network,
-        token: config.token,
-        wallet: config.wallet,
+          const [balance, language] = await Promise.all([
+            dependencies.wallet.getBalance({
+              network: config.network,
+              token: config.token,
+              wallet: config.wallet,
+            }),
+            resolveConversationLanguage(dependencies),
+          ]);
+      const token = balance.token ?? config.token;
+      // The provider value is only presented: the model receives two decimals plus
+      // the spoken form, and the wallet keeps returning its exact amount untouched.
+      const presentation = formatBalanceForAgent({
+        balance: balance.balance,
+        token,
+        language,
       });
       return {
         network: balance.network,
-        token: balance.token ?? config.token,
+        token,
         address: balance.address,
-        balance: balance.balance,
+        balance: presentation.balance,
+        balanceSpoken: presentation.balanceSpoken,
       };
     },
   });
