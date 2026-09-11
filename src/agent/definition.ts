@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildWalletAgentInstructions, type WalletAgentConfig } from './instructions.js';
+import { formatBalanceForAgent } from './balance-format.js';
 import type { ConversationLanguage } from '../conversations/language.js';
 import { invalidateSelectedRecipient, type ConversationSession } from '../conversations/session-state.js';
 import type { RecipientMemoryRuntime } from '../memory/runtime.js';
@@ -208,11 +209,27 @@ function createWalletOperations(context: WalletAgentContext): AgentToolDefinitio
       inputSchema: balanceInputSchema,
       execute: async (input) => {
         const parsed = input as z.infer<typeof balanceInputSchema>;
-        return context.wallet.getBalance({
+        const token = parsed.token
+          ? normalizeWalletToken(parsed.token, context.config.token)
+          : undefined;
+        const balance = await context.wallet.getBalance({
           network: parsed.network,
-          ...(parsed.token ? { token: normalizeWalletToken(parsed.token, context.config.token) } : {}),
+          ...(token ? { token } : {}),
           wallet: parsed.wallet ?? context.config.wallet,
         });
+        // The provider value is presented, never rewritten: the model gets the
+        // amount at two decimals plus its spoken form in the conversation
+        // language, so the voice does not read a 24-character decimal.
+        const presentation = formatBalanceForAgent({
+          balance: balance.balance,
+          token: balance.token ?? token ?? context.config.token,
+          language: context.language,
+        });
+        return {
+          ...balance,
+          balance: presentation.balance,
+          balanceSpoken: presentation.balanceSpoken,
+        };
       },
     },
     {

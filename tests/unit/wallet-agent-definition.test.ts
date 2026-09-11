@@ -89,6 +89,59 @@ describe("wallet agent definition", () => {
     expect(normalizeWalletToken("my-usdt", "usdt-test")).toBe("my-usdt");
   });
 
+  it("hands the model a two-decimal amount and its spoken form without touching the provider value", async () => {
+    const rawBalance = "97.989332609300122852";
+    const getBalance = vi.fn(async () => ({
+      network: "sepolia",
+      token: "USDC",
+      address: "0x1234000000000000000000000000000000abcd",
+      balance: rawBalance,
+    }));
+    const input = context();
+    input.wallet = { getBalance } as unknown as WalletAgentContext["wallet"];
+    const balanceOperation = createWalletAgentDefinition()
+      .tools(input)
+      .find((tool) => tool.name === "get_balance");
+
+    await expect(balanceOperation?.execute({ network: "sepolia" }, input)).resolves.toEqual({
+      network: "sepolia",
+      token: "USDC",
+      address: "0x1234000000000000000000000000000000abcd",
+      balance: "97.99",
+      balanceSpoken: "ninety-seven USDC and ninety-nine cents",
+    });
+    // The provider contract is untouched: it still returns the raw decimal.
+    expect(getBalance).toHaveBeenCalledWith({
+      network: "sepolia",
+      wallet: "agent-demo",
+    });
+    expect(rawBalance).toBe("97.989332609300122852");
+  });
+
+  it("spells the balance out in the conversation language", async () => {
+    const input = context();
+    input.language = "es";
+    input.wallet = {
+      getBalance: async () => ({
+        network: "sepolia",
+        token: "USDC",
+        address: "0x1234000000000000000000000000000000abcd",
+        balance: "96.994",
+      }),
+    } as unknown as WalletAgentContext["wallet"];
+    const balanceOperation = createWalletAgentDefinition()
+      .tools(input)
+      .find((tool) => tool.name === "get_balance");
+
+    await expect(balanceOperation?.execute({ network: "sepolia" }, input)).resolves.toEqual({
+      network: "sepolia",
+      token: "USDC",
+      address: "0x1234000000000000000000000000000000abcd",
+      balance: "96.99",
+      balanceSpoken: "noventa y seis USDC con noventa y nueve centavos",
+    });
+  });
+
   it("keeps live transfer policy in the canonical operation layer", () => {
     process.env.WDK_TOOLS_SOURCE = "live";
     process.env.WDK_MAX_TRANSFER_AMOUNT = "1";

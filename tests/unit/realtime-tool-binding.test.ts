@@ -102,12 +102,14 @@ describe('realtime tool binding — strict schema is a real boundary', () => {
 });
 
 describe('realtime tool binding — production execution against the fixture stack', () => {
-  it('get_balance returns the fixture balance', async () => {
+  it('get_balance returns the fixture balance rounded to two decimals with a spoken form', async () => {
     const stack = createRealtimeFixtureStack();
     const binding = createRealtimeToolBinding(stack.deps);
     const output = await binding.executeFunctionCall(call('get_balance', {}));
-    const parsed = JSON.parse(output.output) as { balance?: string };
-    expect(parsed.balance).toBe('42.5');
+    const parsed = JSON.parse(output.output) as { balance?: string; balanceSpoken?: string };
+    expect(parsed.balance).toBe('42.50');
+    // The fixture conversation snapshot is persisted in Spanish.
+    expect(parsed.balanceSpoken).toBe('cuarenta y dos USDT con cincuenta centavos');
     expect(binding.calls).toHaveLength(1);
   });
 
