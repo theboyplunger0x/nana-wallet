@@ -17,6 +17,12 @@ export type EmbeddingPort = {
 
 export type RankingConfig = {
   scoreThreshold: number;
+  /**
+   * Relevance floor. Below it a candidate is noise, so the lookup is a real miss.
+   * Between the floor and `scoreThreshold` there is a plausible-but-unsure
+   * candidate: the caller must ask, never deny that the contact exists.
+   */
+  scoreFloor: number;
   scoreMargin: number;
 };
 
@@ -62,7 +68,10 @@ export function classifyRecipientCandidates(
   if (qualifiedRecipient) return { status: 'resolved', candidates: ranked, recipient: qualifiedRecipient };
 
   const [first, second] = ranked;
-  if (!first || first.score < config.scoreThreshold) return { status: 'no_match', candidates: ranked };
+  if (!first || first.score < config.scoreFloor) return { status: 'no_match', candidates: [] };
+  // Plausible but unproven: hand the candidates over so the caller can ask
+  // "is this the contact you meant?" instead of reporting that nothing exists.
+  if (first.score < config.scoreThreshold) return { status: 'clarification_required', candidates: ranked };
   if (second && first.score - second.score < config.scoreMargin) {
     return { status: 'clarification_required', candidates: ranked };
   }

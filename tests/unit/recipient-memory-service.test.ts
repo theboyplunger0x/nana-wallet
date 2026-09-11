@@ -54,23 +54,38 @@ describe('recipient-memory ranking', () => {
   it('RED: resolves one exact normalized name deterministically, but asks when two exact names exist', () => {
     expect(classifyRecipientCandidates('Lucas', [candidate(), candidate({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Luciano', normalizedName: 'luciano', score: 0.9 })], {
       scoreThreshold: 0.95,
+      scoreFloor: 0.55,
       scoreMargin: 0.5,
     }).status).toBe('resolved');
 
     expect(classifyRecipientCandidates('Lucas', [candidate(), candidate({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', description: 'the electrician', score: 0.99 })], {
       scoreThreshold: 0.1,
+      scoreFloor: 0.05,
       scoreMargin: 0.01,
     })).toMatchObject({ status: 'clarification_required' });
   });
 
-  it('RED: requires a score threshold and safe margin for semantic-only results', () => {
+  it('RED: asks instead of denying when the only candidate is plausible but below the threshold', () => {
+    // A single candidate at 0.77 against a 0.78 threshold used to answer
+    // `no_match`, so the agent denied a contact it had just been handed. That band
+    // is now a question: the caller must ask whether it is the right contact.
     expect(classifyRecipientCandidates('my grandson', [candidate({ normalizedName: 'lucas', score: 0.77 })], {
       scoreThreshold: 0.78,
+      scoreFloor: 0.55,
       scoreMargin: 0.08,
-    })).toMatchObject({ status: 'no_match' });
+    })).toMatchObject({ status: 'clarification_required', candidates: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }] });
+
+    // Below the floor the candidate is noise: a real miss, and nothing is shipped
+    // to the caller, so `status` can never contradict the payload.
+    expect(classifyRecipientCandidates('my grandson', [candidate({ normalizedName: 'lucas', score: 0.42 })], {
+      scoreThreshold: 0.78,
+      scoreFloor: 0.55,
+      scoreMargin: 0.08,
+    })).toEqual({ status: 'no_match', candidates: [] });
 
     expect(classifyRecipientCandidates('my grandson', [candidate({ normalizedName: 'lucas', score: 0.88 }), candidate({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Mateo', normalizedName: 'mateo', score: 0.84 })], {
       scoreThreshold: 0.78,
+      scoreFloor: 0.55,
       scoreMargin: 0.08,
     })).toMatchObject({ status: 'clarification_required' });
   });
@@ -79,7 +94,7 @@ describe('recipient-memory ranking', () => {
     const result = classifyRecipientCandidates('my contact', [
       candidate({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Lucas', normalizedName: 'lucas', score: 0.82 }),
       candidate({ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Mateo', normalizedName: 'mateo', score: 0.93 }),
-    ], { scoreThreshold: 0.78, scoreMargin: 0.08 });
+    ], { scoreThreshold: 0.78, scoreFloor: 0.55, scoreMargin: 0.08 });
 
     expect(result).toMatchObject({ status: 'resolved', recipient: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } });
   });
@@ -88,6 +103,7 @@ describe('recipient-memory ranking', () => {
     const memoryRepository = repository();
     const service = new RecipientMemoryService(memoryRepository, { embed: vi.fn().mockResolvedValue(VECTOR) }, {
       scoreThreshold: 0.78,
+      scoreFloor: 0.55,
       scoreMargin: 0.08,
     });
 
@@ -97,6 +113,7 @@ describe('recipient-memory ranking', () => {
 
     const unavailable = new RecipientMemoryService(repository(), { embed: vi.fn().mockRejectedValue(new Error('model unavailable')) }, {
       scoreThreshold: 0.78,
+      scoreFloor: 0.55,
       scoreMargin: 0.08,
     });
     await expect(unavailable.searchRecipients(USER_A, 'Lucas')).resolves.toEqual({ status: 'unavailable', candidates: [] });
@@ -104,13 +121,13 @@ describe('recipient-memory ranking', () => {
     const databaseUnavailable = new RecipientMemoryService(
       repository({ searchRecipients: vi.fn().mockRejectedValue(new Error('database unavailable')) }),
       { embed: vi.fn().mockResolvedValue(VECTOR) },
-      { scoreThreshold: 0.78, scoreMargin: 0.08 },
+      { scoreThreshold: 0.78, scoreFloor: 0.55, scoreMargin: 0.08 },
     );
     await expect(databaseUnavailable.searchRecipients(USER_A, 'Lucas')).resolves.toEqual({ status: 'unavailable', candidates: [] });
   });
 
   it('RED: keeps irrelevant facts out and turns close conflicting relationships into clarification', async () => {
-    const ranking = { scoreThreshold: 0.78, scoreMargin: 0.08 };
+    const ranking = { scoreThreshold: 0.78, scoreFloor: 0.55, scoreMargin: 0.08 };
     expect(classifyUserMemoryFacts('mi nieto', [fact({ fact: 'Alicia es mi doctora', score: 0.99 })], ranking)).toEqual({ status: 'ok', facts: [] });
     expect(classifyUserMemoryFacts('mi nieto', [
       fact(),
@@ -119,7 +136,7 @@ describe('recipient-memory ranking', () => {
   });
 
   it('RED: requires clarification for distinct matching relationship identities even with a large score gap', () => {
-    const ranking = { scoreThreshold: 0.78, scoreMargin: 0.08 };
+    const ranking = { scoreThreshold: 0.78, scoreFloor: 0.55, scoreMargin: 0.08 };
     expect(classifyUserMemoryFacts('mi nieto', [
       fact({ fact: 'Lucas es mi nieto', score: 0.99 }),
       fact({ id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', fact: 'Mateo es mi nieto', score: 0.40 }),
@@ -127,7 +144,7 @@ describe('recipient-memory ranking', () => {
   });
 
   it('RED: resolves one lexically name-and-description-qualified recipient without lowering the semantic threshold', () => {
-    const ranking = { scoreThreshold: 0.78, scoreMargin: 0.08 };
+    const ranking = { scoreThreshold: 0.78, scoreFloor: 0.55, scoreMargin: 0.08 };
     const electrician = candidate({ description: 'el electricista', score: 0.648 });
     expect(classifyRecipientCandidates('Lucas el electricista', [electrician], ranking)).toMatchObject({
       status: 'resolved', recipient: { id: electrician.id },
@@ -150,6 +167,7 @@ describe('recipient-memory ranking', () => {
       const electrician = candidate({ description: 'el electricista', score });
       expect(classifyRecipientCandidates('Lucas el electricista', [electrician], {
         scoreThreshold: 0.78,
+        scoreFloor: 0.55,
         scoreMargin: 0.08,
       })).toMatchObject({ status: 'resolved', recipient: { id: electrician.id } });
     },
@@ -161,6 +179,7 @@ describe('recipient-memory ranking', () => {
     });
     const memory = new RecipientMemoryService(memoryRepository, { embed: vi.fn().mockResolvedValue(VECTOR) }, {
       scoreThreshold: 0.78,
+      scoreFloor: 0.55,
       scoreMargin: 0.08,
     });
 

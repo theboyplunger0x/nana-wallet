@@ -29,7 +29,7 @@ function buildConfiguredMemoryService(
   configuredMemoryService = new RecipientMemoryService(
    new RecipientMemoryRepository(configuredDatabase),
    new EmbeddingService(config.modelCacheDirectory),
-   { scoreThreshold: config.scoreThreshold, scoreMargin: config.scoreMargin },
+   { scoreThreshold: config.scoreThreshold, scoreFloor: config.scoreFloor, scoreMargin: config.scoreMargin },
   );
  }
  return configuredMemoryService;

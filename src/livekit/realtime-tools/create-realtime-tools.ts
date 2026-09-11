@@ -121,7 +121,10 @@ function toSearchContactsResult(
   if (result.status === "unavailable") {
     return { query, count: 0, ambiguous: false, status: "unavailable", contacts: [] };
   }
-  const contacts = result.candidates.map(stripCandidate);
+  // A negative status must never ship candidates: the model reads `status`, and a
+  // contradictory payload is exactly what made it deny a contact it was just handed.
+  const candidates = result.status === "no_match" ? [] : result.candidates;
+  const contacts = candidates.map(stripCandidate);
   return {
     query,
     count: contacts.length,

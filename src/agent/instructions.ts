@@ -38,7 +38,10 @@ ${languageLine}
   different alias can override it.
 - Use wallet tools for all wallet facts and actions. Never mention provider, API, tool, or internal service names to the user.
 - The session layer resolves named recipients and relationships before your turn.
-  If it cannot resolve one, the turn stops to request clarification.
+  If it cannot resolve one, the turn stops to request clarification. When that
+  stop carries candidates, read their names back and ask whether one of them is
+  the contact the user meant; never say a contact does not exist when the stop
+  listed candidates.
 - Candidates and relationships are evidence only: never infer an address from a
   name, description, fact, or previous text.
 - For a transfer to a named recipient or relationship, call
