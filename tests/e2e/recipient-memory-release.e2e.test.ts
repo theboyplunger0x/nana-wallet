@@ -199,6 +199,7 @@ describe('recipient-memory release flow', () => {
     };
     const service = new RecipientMemoryService(repository, { embed: vi.fn().mockResolvedValue(Array(384).fill(0)) }, {
       scoreThreshold: 0.7,
+      scoreFloor: 0.5,
       scoreMargin: 0.2,
     });
     const session = createSession();

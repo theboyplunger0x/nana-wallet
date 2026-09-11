@@ -101,7 +101,7 @@ describe.runIf(LIVE)('live LLM recipient retrieval', () => {
     const database = createDatabaseClient(DATABASE_URL);
     const repository = new RecipientMemoryRepository(database);
     const embeddings = new EmbeddingService(process.env.RECIPIENT_MEMORY_MODEL_CACHE ?? '.cache/recipient-memory-model');
-    const service = new RecipientMemoryService(repository, embeddings, { scoreThreshold: 0.78, scoreMargin: 0.08 });
+    const service = new RecipientMemoryService(repository, embeddings, { scoreThreshold: 0.78, scoreFloor: 0.55, scoreMargin: 0.08 });
     const executed: Array<{ scenario: string; tool: SearchAction['tool']; args: { query: string } }> = [];
 
     try {

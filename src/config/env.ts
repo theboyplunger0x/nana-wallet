@@ -32,6 +32,12 @@ const environmentSchema = z.object({
     .max(1)
     .optional()
     .default(0.08),
+  RECIPIENT_MEMORY_SCORE_FLOOR: z.coerce
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .default(0.55),
   RECIPIENT_MEMORY_SEED_FILE: optionalNonEmpty,
 });
 
@@ -42,6 +48,7 @@ export type RecipientMemoryConfig = {
   demoUserId?: string;
   modelCacheDirectory: string;
   scoreThreshold: number;
+  scoreFloor: number;
   scoreMargin: number;
   seedFile?: string;
 };
@@ -77,6 +84,7 @@ export function readRecipientMemoryConfig(
     demoUserId: parsed.DEMO_USER_ID,
     modelCacheDirectory: parsed.RECIPIENT_MEMORY_MODEL_CACHE,
     scoreThreshold: parsed.RECIPIENT_MEMORY_SCORE_THRESHOLD,
+    scoreFloor: parsed.RECIPIENT_MEMORY_SCORE_FLOOR,
     scoreMargin: parsed.RECIPIENT_MEMORY_SCORE_MARGIN,
     seedFile: parsed.RECIPIENT_MEMORY_SEED_FILE,
   };

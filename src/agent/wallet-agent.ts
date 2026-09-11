@@ -392,13 +392,20 @@ function createMemoryAgentTools(raw: ReturnType<typeof createRecipientMemoryTool
 const CLARIFICATION_COPY = {
   en: {
     ask: (list: string) => `Which recipient do you mean: ${list}?`,
+    confirm: (name: string) => `Did you mean ${name}?`,
     missing: 'I need to know which recipient you mean before preparing a transfer.',
   },
   es: {
     ask: (list: string) => `¿A qué destinatario te referís: ${list}?`,
+    confirm: (name: string) => `¿Te referís a ${name}?`,
     missing: 'Necesito saber a qué destinatario te referís antes de preparar la transferencia.',
   },
 } as const;
+
+function describeCandidate(candidate: { name: string; description: string }): string {
+  const description = candidate.description?.trim();
+  return description ? `${candidate.name} (${description})` : candidate.name;
+}
 
 function clarificationMessage(
   candidates: Array<{ name: string; description: string }>,
@@ -406,7 +413,9 @@ function clarificationMessage(
 ): string {
   const copy = CLARIFICATION_COPY[language] ?? CLARIFICATION_COPY.en;
   if (candidates.length === 0) return copy.missing;
-  return copy.ask(candidates.map((candidate) => `${candidate.name} (${candidate.description})`).join(', '));
+  // A single plausible candidate is not a menu: ask whether it is the right one.
+  if (candidates.length === 1) return copy.confirm(candidates[0]!.name);
+  return copy.ask(candidates.map(describeCandidate).join(', '));
 }
 
 function mapAgentError(err: unknown): string {
