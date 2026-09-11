@@ -265,6 +265,23 @@ describe("bearer token plumbing (PMU-016/017)", () => {
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer token-de-desarrollo");
   });
 
+  it("still sends the demo token when the build is a production one", async () => {
+    // Regression: gating the demo token on `import.meta.env.DEV` made a
+    // production demo build return "", and `authedFetch` then rejected every
+    // request before it left the browser. The deployed demo rendered its error
+    // state on every route, with no request reaching the API.
+    vi.stubEnv("VITE_IDENTITY_PROVIDER", "demo");
+    vi.stubEnv("DEV", false);
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true, data: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.getContacts();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer token-de-desarrollo");
+  });
+
   it("uses the sessionStorage token in demo mode when no source is set", async () => {
     vi.stubEnv("VITE_IDENTITY_PROVIDER", "demo");
     window.sessionStorage.setItem("nana-wallet-token", "stored-token");

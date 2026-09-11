@@ -170,7 +170,11 @@ async function getFreshToken(): Promise<string | null> {
       const storedToken = window.sessionStorage.getItem(TOKEN_STORAGE_KEY_DEMO);
       if (storedToken) return storedToken;
     }
-    return import.meta.env.DEV ? "token-de-desarrollo" : "";
+    // Demo identity needs no token source: the backend resolves the demo user and
+    // ignores Authorization. Gating this on DEV made a production demo build
+    // return "", and `authedFetch` then rejected every request before it left
+    // the browser, so the deployed demo rendered its error state on every route.
+    return "token-de-desarrollo";
   }
   // Privy (or unset identity provider) without an injected source: fail closed.
   return null;
